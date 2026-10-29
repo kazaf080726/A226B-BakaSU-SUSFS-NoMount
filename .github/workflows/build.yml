@@ -94,10 +94,13 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.zip
+          files: |
+            dist/*.zip
+            dist/Image.gz
           overwrite: true
           fail_on_unmatched_files: true
           body: |
             BakaSU + SUSFS v2.3.0 + NoMount for Samsung Galaxy A22 5G (SM-A226B).
-            BakaSU commit: `${{ github.sha }}` (see build-info.txt in the zip)
+            Exact BakaSU / SUSFS / NoMount versions are recorded in `build-info.txt`
+            inside the AnyKernel3 zip.
           generate_release_notes: false
