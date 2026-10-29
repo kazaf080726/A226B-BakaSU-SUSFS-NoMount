@@ -1,0 +1,98 @@
+name: Build SM-A226B kernel
+
+on:
+  workflow_dispatch:
+    inputs:
+      bakasu_ref:
+        description: "BakaSU ref (branch/tag/commit)"
+        required: false
+        default: main
+      nomount_ref:
+        description: "NoMount ref (branch/tag/commit)"
+        required: false
+        default: master
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 240
+    steps:
+      - name: Checkout kernel source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+                      /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          df -h /
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev \
+            lz4 device-tree-compiler python3 zip unzip cpio rsync curl git libtinfo5 || \
+          sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev \
+            lz4 device-tree-compiler python3 zip unzip cpio rsync curl git
+
+      - name: Cache toolchain
+        uses: actions/cache@v4
+        with:
+          path: toolchain
+          key: aosp-clang-r383902-gcc49-v1
+
+      - name: Fetch toolchain
+        run: bash ci/fetch_toolchain.sh
+
+      - name: Clone BakaSU
+        run: |
+          git clone https://github.com/Baka-SU/BakaSU.git KernelSU
+          cd KernelSU
+          git checkout "${{ github.event.inputs.bakasu_ref || 'main' }}"
+          git log -1 --format='BakaSU %H %ci %s'
+
+      - name: Clone NoMount
+        run: |
+          git clone https://github.com/maxsteeel/nomount.git NoMount
+          cd NoMount
+          git checkout "${{ github.event.inputs.nomount_ref || 'master' }}"
+          git log -1 --format='NoMount %H %ci %s'
+
+      - name: Build kernel
+        run: bash ci/build.sh
+
+      - name: Package
+        run: bash ci/package.sh
+
+      - name: Show versions
+        run: |
+          echo "BakaSU: $(git -C KernelSU rev-parse HEAD)"
+          echo "NoMount: $(git -C NoMount rev-parse HEAD)"
+          grep -m1 SUSFS_VERSION include/linux/susfs.h
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: A226B-BakaSU-SUSFS-NoMount
+          path: |
+            dist/*.zip
+            dist/Image.gz
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          body: |
+            BakaSU + SUSFS v2.3.0 + NoMount for Samsung Galaxy A22 5G (SM-A226B).
+            BakaSU commit: `${{ github.sha }}` (see build-info.txt in the zip)
+          generate_release_notes: false
