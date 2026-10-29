@@ -5,7 +5,13 @@ BakaSU + SUSFS + NoMount kernel for Samsung Galaxy A22 5G (SM-A226B)
 内核：Linux 4.14.186（Samsung 官方开源包 SM-A226B_13_Opensource）
 类型：Non-GKI（arm64）
 
-一、集成了什么
+一、下载与版本
+--------------
+- Releases（推荐）：https://github.com/kazaf080726/A226B-BakaSU-SUSFS-NoMount/releases
+- 最新 CI 构建：仓库 Actions -> Build SM-A226B kernel -> 最近一次 run 的 Artifacts
+- v1.0.0 构建信息：BakaSU `d5e9e02`、SUSFS `v2.3.0`、NoMount `bf1847f`（见 zip 内 build-info.txt）
+
+二、集成了什么
 --------------
 1. BakaSU（最新 main，构建时从 GitHub 拉取）
    - KernelSU 分支，支持 Non-GKI 4.14 的 SUSFS Inline Hook 模式
@@ -34,7 +40,7 @@ BakaSU + SUSFS + NoMount kernel for Samsung Galaxy A22 5G (SM-A226B)
    - 内核原生集成（CONFIG_NOMOUNT=y），不使用 LKM
    - 用户态请安装 NoMount 官方 Metamodule（WebUI 管理）
 
-二、没有移植 / 已知限制
+三、没有移植 / 已知限制
 -----------------------
 - priority UID filter（getpriority 滥用检测对抗）：上游 2026-10 才加入，
   Non-GKI 4.14 补丁尚未包含，本内核未启用。不影响其它隐藏功能。
@@ -45,7 +51,7 @@ BakaSU + SUSFS + NoMount kernel for Samsung Galaxy A22 5G (SM-A226B)
 - 本内核未在本机实机验证（只完成编译与符号校验）。首次刷入前请务必备份
   原厂 boot.img，并确认已解锁 BootLoader。
 
-三、构建
+四、构建
 --------
 GitHub Actions（推荐）：
   Actions -> Build SM-A226B kernel -> Run workflow
@@ -60,7 +66,7 @@ GitHub Actions（推荐）：
 
 工具链：AOSP clang-r383902 + GCC 4.9 binutils（Samsung 原厂同款）。
 
-四、刷入
+五、刷入
 --------
 1. 解锁 BootLoader（会清空数据并熔断 KNOX，不可逆）。
 2. 使用 TWRP（a22x 的第三方 recovery）刷入
@@ -75,7 +81,7 @@ GitHub Actions（推荐）：
   如仍无法开机请同时刷入 vbmeta_disabled（或使用已禁用校验的 TWRP）。
 - KNOX 相关功能（Samsung Pay、Secure Folder 等）会永久失效。
 
-五、目录说明
+六、目录说明
 ------------
 - 内核源码根目录即本仓库根目录（完整 Samsung 4.14.186 + 集成修改）
 - drivers/kernelsu -> ../KernelSU/kernel（构建时 clone，不入库）
@@ -84,7 +90,7 @@ GitHub Actions（推荐）：
 - anykernel/      AnyKernel3 模板
 - patches/        本仓库相对原厂源码的集成改动说明（见 patches/README.md）
 
-六、致谢
+七、致谢
 --------
 - BakaSU: https://github.com/Baka-SU/BakaSU
 - SUSFS: simonpunk https://gitlab.com/simonpunk/susfs4ksu

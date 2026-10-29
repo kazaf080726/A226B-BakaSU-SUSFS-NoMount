@@ -13,6 +13,9 @@ on:
         default: master
   push:
     branches: [ main ]
+    paths-ignore:
+      - 'README.md'
+      - 'patches/**'
     tags: [ 'v*' ]
 
 permissions:
