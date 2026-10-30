@@ -1,0 +1,1464 @@
+#!/system/bin/sh
+
+MODDIR=${0%/*}
+MODULE_ID=pathmask
+LEGACY_MODULE_ID=nohello-demo
+LOG_TAG=pathmask
+KO_NAME=pathmask.ko
+KO_PATH="$MODDIR/$KO_NAME"
+PROC_GUARD_KO_NAME=procguard.ko
+PROC_GUARD_KO_PATH="$MODDIR/$PROC_GUARD_KO_NAME"
+SCENE_WATCH_SCRIPT="$MODDIR/scene-debugfs-watch.sh"
+SCENE_PACKAGE="com.omarea.vtools"
+PERSIST_DIR="/data/adb/pathmask"
+LEGACY_PERSIST_DIR="/data/adb/nohello"
+LOAD_FAIL_COUNT_PATH="$PERSIST_DIR/load_fail_count"
+LOAD_FAIL_REASON_PATH="$PERSIST_DIR/load_fail_reason"
+LOAD_FAIL_LIMIT=3
+
+MOD_CONFIG_PATH="$MODDIR/target_path.conf"
+MOD_HIDE_DIRENTS_CONFIG="$MODDIR/hide_dirents.conf"
+MOD_SCOPE_MODE_CONFIG="$MODDIR/scope_mode.conf"
+MOD_DENY_UIDS_CONFIG="$MODDIR/deny_uids.conf"
+MOD_DENY_PACKAGES_CONFIG="$MODDIR/deny_packages.conf"
+MOD_ALLOW_UIDS_CONFIG="$MODDIR/allow_uids.conf"
+MOD_ALLOW_PACKAGES_CONFIG="$MODDIR/allow_packages.conf"
+MOD_ALLOW_SYSTEM_UIDS_CONFIG="$MODDIR/allow_system_uids.conf"
+MOD_WAIT_SECONDS_CONFIG="$MODDIR/wait_seconds.conf"
+MOD_ENABLE_SYSCALL_HOOKS_CONFIG="$MODDIR/enable_syscall_hooks.conf"
+MOD_SYSCALL_HOOKS_CONFIG="$MODDIR/syscall_hooks.conf"
+MOD_WRITE_OP_POLICY_CONFIG="$MODDIR/write_op_policy.conf"
+MOD_AUTO_SCENE_DEBUGFS_CONFIG="$MODDIR/auto_scene_debugfs.conf"
+MOD_PROC_GUARD_CONFIG="$MODDIR/procguard.conf"
+
+CONFIG_PATH="$PERSIST_DIR/target_path.conf"
+HIDE_DIRENTS_CONFIG="$PERSIST_DIR/hide_dirents.conf"
+SCOPE_MODE_CONFIG="$PERSIST_DIR/scope_mode.conf"
+DENY_UIDS_CONFIG="$PERSIST_DIR/deny_uids.conf"
+DENY_PACKAGES_CONFIG="$PERSIST_DIR/deny_packages.conf"
+ALLOW_UIDS_CONFIG="$PERSIST_DIR/allow_uids.conf"
+ALLOW_PACKAGES_CONFIG="$PERSIST_DIR/allow_packages.conf"
+ALLOW_SYSTEM_UIDS_CONFIG="$PERSIST_DIR/allow_system_uids.conf"
+WAIT_SECONDS_CONFIG="$PERSIST_DIR/wait_seconds.conf"
+ENABLE_SYSCALL_HOOKS_CONFIG="$PERSIST_DIR/enable_syscall_hooks.conf"
+SYSCALL_HOOKS_CONFIG="$PERSIST_DIR/syscall_hooks.conf"
+WRITE_OP_POLICY_CONFIG="$PERSIST_DIR/write_op_policy.conf"
+AUTO_SCENE_DEBUGFS_CONFIG="$PERSIST_DIR/auto_scene_debugfs.conf"
+PROC_GUARD_CONFIG="$PERSIST_DIR/procguard.conf"
+SCENE_DEBUGFS_PATHS_PATH="$PERSIST_DIR/scene_debugfs_paths"
+SCENE_DEBUGFS_STATE_PATH="$PERSIST_DIR/scene_debugfs_state"
+SCENE_WATCH_STOP_PATH="$PERSIST_DIR/scene_debugfs_watch.stop"
+LEGACY_TARGET_WAIT_SECONDS_CONFIG="$PERSIST_DIR/target_wait_seconds.conf"
+LEGACY_PACKAGE_WAIT_SECONDS_CONFIG="$PERSIST_DIR/package_wait_seconds.conf"
+BOOT_STATE_PATH="$PERSIST_DIR/boot_state"
+
+TARGET_PATHS=""
+HIDE_DIRENTS=1
+SCOPE_MODE=deny
+DENY_UIDS=""
+WAIT_SECONDS=60
+ENABLE_SYSCALL_HOOKS=0
+SYSCALL_HOOKS=""
+WRITE_OP_POLICY=passthrough
+AUTO_SCENE_DEBUGFS=0
+SCENE_DEBUGFS_PATHS=""
+SCENE_DEBUGFS_COUNT=0
+SCENE_DEBUGFS_STATUS=disabled
+SCENE_PACKAGE_STATUS=unknown
+UNRESOLVED_PACKAGES=0
+
+read_load_failure_count() {
+	COUNT=0
+	if [ -f "$LOAD_FAIL_COUNT_PATH" ]; then
+		COUNT="$(head -n 1 "$LOAD_FAIL_COUNT_PATH" 2>/dev/null | tr -d '\r ' || true)"
+	fi
+
+	case "$COUNT" in
+		''|*[!0-9]*)
+			COUNT=0
+			;;
+	esac
+
+	printf '%s\n' "$COUNT"
+}
+
+reset_load_failure_guard() {
+	rm -f "$LOAD_FAIL_COUNT_PATH" "$LOAD_FAIL_REASON_PATH" 2>/dev/null || true
+}
+
+record_load_failure() {
+	REASON="$1"
+	COUNT="$(read_load_failure_count)"
+	COUNT=$((COUNT + 1))
+	mkdir -p "$PERSIST_DIR" 2>/dev/null || true
+	printf '%s\n' "$COUNT" > "$LOAD_FAIL_COUNT_PATH" 2>/dev/null || true
+	printf '%s\n' "$REASON" > "$LOAD_FAIL_REASON_PATH" 2>/dev/null || true
+	log_e "load failure $COUNT/$LOAD_FAIL_LIMIT: $REASON"
+}
+
+should_skip_after_load_failures() {
+	[ "${PATHMASK_IGNORE_FAIL_GUARD:-0}" = "1" ] && return 1
+
+	COUNT="$(read_load_failure_count)"
+	if [ "$COUNT" -ge "$LOAD_FAIL_LIMIT" ]; then
+		if [ -f "$LOAD_FAIL_REASON_PATH" ]; then
+			REASON="$(head -n 1 "$LOAD_FAIL_REASON_PATH" 2>/dev/null || true)"
+		else
+			REASON=""
+		fi
+		log_e "skip loading after $COUNT consecutive failures; reason=$REASON"
+		log_e "use WebUI save-and-hot-reload or delete $LOAD_FAIL_COUNT_PATH to retry"
+		return 0
+	fi
+
+	return 1
+}
+
+log_i() {
+	log -p i -t "$LOG_TAG" "$*"
+}
+
+log_e() {
+	log -p e -t "$LOG_TAG" "$*"
+}
+
+write_boot_state() {
+	STATE="$1"
+	DETAIL="$2"
+	DEADLINE="$3"
+
+	[ -d "$PERSIST_DIR" ] || mkdir -p "$PERSIST_DIR" 2>/dev/null || return 0
+
+	{
+		printf 'state=%s\n' "$STATE"
+		printf 'updated=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+		[ -n "$DEADLINE" ] && printf 'deadline=%s\n' "$DEADLINE"
+		[ -n "$DETAIL" ] && printf 'detail=%s\n' "$DETAIL"
+	} > "$BOOT_STATE_PATH" 2>/dev/null || true
+}
+
+write_scene_debugfs_state() {
+	STATUS="$1"
+	APPLIED_ENABLED="$2"
+	DETAIL="$3"
+
+	[ -d "$PERSIST_DIR" ] || mkdir -p "$PERSIST_DIR" 2>/dev/null || return 0
+	if [ -n "$SCENE_DEBUGFS_PATHS" ]; then
+		printf '%s\n' "$SCENE_DEBUGFS_PATHS" > "$SCENE_DEBUGFS_PATHS_PATH" 2>/dev/null || true
+	else
+		: > "$SCENE_DEBUGFS_PATHS_PATH" 2>/dev/null || true
+	fi
+	{
+		printf 'enabled=%s\n' "$AUTO_SCENE_DEBUGFS"
+		printf 'applied_enabled=%s\n' "$APPLIED_ENABLED"
+		printf 'status=%s\n' "$STATUS"
+		printf 'package_status=%s\n' "$SCENE_PACKAGE_STATUS"
+		printf 'count=%s\n' "$SCENE_DEBUGFS_COUNT"
+		printf 'updated=%s\n' "$(date +%s 2>/dev/null || echo 0)"
+		[ -n "$DETAIL" ] && printf 'detail=%s\n' "$DETAIL"
+	} > "$SCENE_DEBUGFS_STATE_PATH" 2>/dev/null || true
+}
+
+detect_scene_package_status() {
+	SCENE_PACKAGE_STATUS=unknown
+	if [ -r /data/system/packages.list ]; then
+		if grep -q "^$SCENE_PACKAGE " /data/system/packages.list 2>/dev/null; then
+			SCENE_PACKAGE_STATUS=installed
+		else
+			SCENE_PACKAGE_STATUS=absent
+		fi
+		return
+	fi
+
+	# packages.list should normally be available by the time KernelSU runs
+	# service scripts. If it is not, only accept a positive Package Manager
+	# result; a failure remains "unknown" so early-boot PM readiness cannot
+	# make us incorrectly skip an installed Scene.
+	if command -v pm >/dev/null 2>&1 && command -v timeout >/dev/null 2>&1; then
+		SCENE_PACKAGE_PATH="$(timeout 3 pm path "$SCENE_PACKAGE" 2>/dev/null | head -n 1 || true)"
+		case "$SCENE_PACKAGE_PATH" in
+			package:*) SCENE_PACKAGE_STATUS=installed ;;
+		esac
+	fi
+}
+
+clear_boot_state() {
+	rm -f "$BOOT_STATE_PATH" 2>/dev/null || true
+}
+
+migrate_legacy_wait_seconds() {
+	# Combine the old per-phase wait files into a single wait_seconds.conf
+	# (taking the larger value), then drop the legacy files. Idempotent.
+	[ -f "$WAIT_SECONDS_CONFIG" ] && {
+		rm -f "$LEGACY_TARGET_WAIT_SECONDS_CONFIG" \
+			"$LEGACY_PACKAGE_WAIT_SECONDS_CONFIG" 2>/dev/null || true
+		return
+	}
+
+	OLD_TARGET=""
+	OLD_PACKAGE=""
+	[ -f "$LEGACY_TARGET_WAIT_SECONDS_CONFIG" ] && \
+		OLD_TARGET="$(head -n 1 "$LEGACY_TARGET_WAIT_SECONDS_CONFIG" 2>/dev/null | tr -d '\r ')"
+	[ -f "$LEGACY_PACKAGE_WAIT_SECONDS_CONFIG" ] && \
+		OLD_PACKAGE="$(head -n 1 "$LEGACY_PACKAGE_WAIT_SECONDS_CONFIG" 2>/dev/null | tr -d '\r ')"
+
+	case "$OLD_TARGET" in ''|*[!0-9]*) OLD_TARGET=0 ;; esac
+	case "$OLD_PACKAGE" in ''|*[!0-9]*) OLD_PACKAGE=0 ;; esac
+
+	if [ "$OLD_TARGET" -gt 0 ] || [ "$OLD_PACKAGE" -gt 0 ]; then
+		MAX_WAIT="$OLD_TARGET"
+		[ "$OLD_PACKAGE" -gt "$MAX_WAIT" ] && MAX_WAIT="$OLD_PACKAGE"
+		printf '%s\n' "$MAX_WAIT" > "$WAIT_SECONDS_CONFIG" 2>/dev/null || true
+		log_i "merged legacy wait files (target=$OLD_TARGET package=$OLD_PACKAGE) -> wait_seconds=$MAX_WAIT"
+	fi
+
+	rm -f "$LEGACY_TARGET_WAIT_SECONDS_CONFIG" \
+		"$LEGACY_PACKAGE_WAIT_SECONDS_CONFIG" 2>/dev/null || true
+}
+
+seed_config_file() {
+	DEST="$1"
+	SRC="$2"
+	DEFAULT_VALUE="$3"
+
+	if [ -f "$DEST" ]; then
+		return
+	fi
+
+	if [ -f "$SRC" ]; then
+		cp "$SRC" "$DEST" 2>/dev/null && return
+	fi
+
+	printf '%s\n' "$DEFAULT_VALUE" > "$DEST"
+}
+
+# Migrate a persisted conf from a *known previous default* to the
+# current template. Only does anything if the existing file is byte-
+# identical to one of the prior known defaults; users who customised
+# their conf are never touched. Useful when a release ships an
+# updated default (new path, new package, etc.) and we want existing
+# unmodified installs to inherit it without dropping user edits.
+#
+# Args:
+#   $1  destination path (the persisted conf in /data/adb/pathmask)
+#   $2  template path     (the current shipped conf in $MODDIR)
+#   $3  newline-separated list of "previous default" SHA1 hashes
+#       expressed as a single comma-separated string. The file
+#       is migrated if and only if its current content sha1 is
+#       in this list.
+migrate_known_default() {
+	DEST="$1"
+	SRC="$2"
+	KNOWN_HASHES="$3"
+
+	[ -f "$DEST" ] || return 0
+	[ -f "$SRC" ] || return 0
+	[ -n "$KNOWN_HASHES" ] || return 0
+
+	# Use sha1sum for the hash comparison (Android toybox ships
+	# sha1sum in /system/bin since at least platform 28). Fall back
+	# silently if it's missing -- users on older devices keep their
+	# conf as-is, which is the conservative behaviour.
+	command -v sha1sum >/dev/null 2>&1 || return 0
+
+	CUR_HASH="$(sha1sum "$DEST" 2>/dev/null | awk '{print $1}')"
+	[ -n "$CUR_HASH" ] || return 0
+
+	case ",$KNOWN_HASHES," in
+		*",$CUR_HASH,"*)
+			cp "$SRC" "$DEST" 2>/dev/null && \
+				log_i "migrated $DEST from a known prior default to the current template"
+			;;
+	esac
+}
+
+migrate_legacy_config() {
+	[ -d "$PERSIST_DIR" ] && return
+	[ -d "$LEGACY_PERSIST_DIR" ] || return
+
+	if mkdir -p "$PERSIST_DIR" 2>/dev/null; then
+		for NAME in target_path.conf hide_dirents.conf scope_mode.conf deny_uids.conf deny_packages.conf allow_uids.conf allow_packages.conf allow_system_uids.conf wait_seconds.conf target_wait_seconds.conf package_wait_seconds.conf auto_scene_debugfs.conf; do
+			if [ -f "$LEGACY_PERSIST_DIR/$NAME" ]; then
+				cp "$LEGACY_PERSIST_DIR/$NAME" "$PERSIST_DIR/$NAME" 2>/dev/null || true
+			fi
+		done
+		log_i "migrated legacy config from $LEGACY_PERSIST_DIR"
+	fi
+}
+
+migrate_allow_scope_split() {
+	[ -f "$SCOPE_MODE_CONFIG" ] || return
+	CURRENT_SCOPE_MODE="$(head -n 1 "$SCOPE_MODE_CONFIG" 2>/dev/null | tr -d '\r ' || true)"
+	[ "$CURRENT_SCOPE_MODE" = "allow" ] || return
+
+	if [ ! -f "$ALLOW_PACKAGES_CONFIG" ] && [ -f "$DENY_PACKAGES_CONFIG" ]; then
+		cp "$DENY_PACKAGES_CONFIG" "$ALLOW_PACKAGES_CONFIG" 2>/dev/null && \
+			log_i "migrated allow_packages.conf from shared deny_packages.conf"
+	fi
+	if [ ! -f "$ALLOW_UIDS_CONFIG" ] && [ -f "$DENY_UIDS_CONFIG" ]; then
+		cp "$DENY_UIDS_CONFIG" "$ALLOW_UIDS_CONFIG" 2>/dev/null && \
+			log_i "migrated allow_uids.conf from shared deny_uids.conf"
+	fi
+}
+
+init_persistent_config() {
+	migrate_legacy_config
+
+	if ! mkdir -p "$PERSIST_DIR" 2>/dev/null; then
+		log_i "could not create $PERSIST_DIR, using module config"
+		CONFIG_PATH="$MOD_CONFIG_PATH"
+		HIDE_DIRENTS_CONFIG="$MOD_HIDE_DIRENTS_CONFIG"
+		SCOPE_MODE_CONFIG="$MOD_SCOPE_MODE_CONFIG"
+		DENY_UIDS_CONFIG="$MOD_DENY_UIDS_CONFIG"
+		DENY_PACKAGES_CONFIG="$MOD_DENY_PACKAGES_CONFIG"
+		ALLOW_UIDS_CONFIG="$MOD_ALLOW_UIDS_CONFIG"
+		ALLOW_PACKAGES_CONFIG="$MOD_ALLOW_PACKAGES_CONFIG"
+		ALLOW_SYSTEM_UIDS_CONFIG="$MOD_ALLOW_SYSTEM_UIDS_CONFIG"
+		WAIT_SECONDS_CONFIG="$MOD_WAIT_SECONDS_CONFIG"
+		ENABLE_SYSCALL_HOOKS_CONFIG="$MOD_ENABLE_SYSCALL_HOOKS_CONFIG"
+		SYSCALL_HOOKS_CONFIG="$MOD_SYSCALL_HOOKS_CONFIG"
+		WRITE_OP_POLICY_CONFIG="$MOD_WRITE_OP_POLICY_CONFIG"
+		AUTO_SCENE_DEBUGFS_CONFIG="$MOD_AUTO_SCENE_DEBUGFS_CONFIG"
+		PROC_GUARD_CONFIG="$MOD_PROC_GUARD_CONFIG"
+		return
+	fi
+
+	chmod 0700 "$PERSIST_DIR" 2>/dev/null || true
+	migrate_legacy_wait_seconds
+	migrate_allow_scope_split
+
+	HAD_SYSCALL_HOOKS_CONFIG=0
+	[ -f "$SYSCALL_HOOKS_CONFIG" ] && HAD_SYSCALL_HOOKS_CONFIG=1
+
+	# Upgrade-path migrations: if the user is still running the
+	# verbatim default from a previous release (we recognise it by
+	# its exact byte content via sha1sum), refresh that file from
+	# the current template. Customised configs are never touched.
+	#
+	# target_path.conf hash list, from oldest to newest:
+	#   - 6d0cc6.../c4a3da... : v2.2.0 - v2.2.7 default
+	#       (3 lines: scene-daemon / scene / SoterService)
+	#   - 14532d.../038f2e... : v2.2.8 - v2.2.9 default
+	#       (4 lines with `any:scene:` group)
+	# deny_packages.conf:
+	#   - 7ad1d9.../8b2b84... : v2.2.0 - v2.2.7 default
+	#       (3 packages, no holmes)
+	#   - b062c1.../27f6e8... : v2.2.8 - v2.2.9 default
+	#       (4 packages, with holmes)
+	# Each hash has both with-trailing-newline and without variants
+	# to cover the slight format drift between releases.
+	migrate_known_default \
+		"$CONFIG_PATH" \
+		"$MOD_CONFIG_PATH" \
+		"6d0cc64350e72f06456c80db047088531f5dc757,c4a3dabda772d3f3a4587f3a823beb1273eb6bce,14532d2af9980c1bae7a7462e27d9bdeededc82b,038f2eddd3228e34cc9173db41300647fdbce245"
+	migrate_known_default \
+		"$DENY_PACKAGES_CONFIG" \
+		"$MOD_DENY_PACKAGES_CONFIG" \
+		"7ad1d966a10590d44d8a1eb76176009f8e4a184d,8b2b84a4ffcb85e3cfca84079dd5468defd3e173,b062c10729966081b41d0e68f1dca051a0f0a522,27f6e8114e83d0d25134aa83d760da1944b3b884"
+
+	seed_config_file "$CONFIG_PATH" "$MOD_CONFIG_PATH" ""
+	seed_config_file "$HIDE_DIRENTS_CONFIG" "$MOD_HIDE_DIRENTS_CONFIG" "1"
+	seed_config_file "$SCOPE_MODE_CONFIG" "$MOD_SCOPE_MODE_CONFIG" "deny"
+	seed_config_file "$DENY_UIDS_CONFIG" "$MOD_DENY_UIDS_CONFIG" ""
+	seed_config_file "$DENY_PACKAGES_CONFIG" "$MOD_DENY_PACKAGES_CONFIG" ""
+	seed_config_file "$ALLOW_UIDS_CONFIG" "$MOD_ALLOW_UIDS_CONFIG" ""
+	seed_config_file "$ALLOW_PACKAGES_CONFIG" "$MOD_ALLOW_PACKAGES_CONFIG" ""
+	seed_config_file "$ALLOW_SYSTEM_UIDS_CONFIG" "$MOD_ALLOW_SYSTEM_UIDS_CONFIG" "0
+1000
+2000"
+	seed_config_file "$WAIT_SECONDS_CONFIG" "$MOD_WAIT_SECONDS_CONFIG" "60"
+	seed_config_file "$ENABLE_SYSCALL_HOOKS_CONFIG" "$MOD_ENABLE_SYSCALL_HOOKS_CONFIG" "1"
+	seed_config_file "$SYSCALL_HOOKS_CONFIG" "$MOD_SYSCALL_HOOKS_CONFIG" "newfstatat,statx,faccessat2,readlinkat,openat,openat2"
+	seed_config_file "$WRITE_OP_POLICY_CONFIG" "$MOD_WRITE_OP_POLICY_CONFIG" "passthrough"
+	seed_config_file "$AUTO_SCENE_DEBUGFS_CONFIG" "$MOD_AUTO_SCENE_DEBUGFS_CONFIG" "0"
+	seed_config_file "$PROC_GUARD_CONFIG" "$MOD_PROC_GUARD_CONFIG" "0"
+
+	# Existing installs from v2.2.8 - v2.3.1 shipped enable_syscall_hooks=0
+	# as a defensive default (Holmes 04 mitigation pre-bisect). Now that the
+	# bisect localised the problem to a single syscall (faccessat) and the
+	# new syscall_hooks.conf already excludes it, the safer behaviour is
+	# to enable the fallback by default. Migrate only the unmodified
+	# defaults when upgrading from configs that predate syscall_hooks.conf.
+	# Once syscall_hooks.conf exists, "0" is a deliberate WebUI master-toggle
+	# choice and must not be auto-migrated back to 1 during hot reload.
+	#   "0" / "0\n" hashes from the v2.2.8 - v2.3.1 default file.
+	if [ "$HAD_SYSCALL_HOOKS_CONFIG" = "0" ]; then
+		migrate_known_default \
+			"$ENABLE_SYSCALL_HOOKS_CONFIG" \
+			"$MOD_ENABLE_SYSCALL_HOOKS_CONFIG" \
+			"b6589fc6ab0dc82cf12099d1c2d40ab994e8410c,09d2af8dd22201dd8d48e5dcfcaed281ff9422c7"
+	fi
+}
+
+add_target_path() {
+	CANDIDATE_PATH="$1"
+
+	if [ -z "$CANDIDATE_PATH" ]; then
+		return
+	fi
+
+	# Dedup: skip if this exact literal path is already in the list. Two
+	# different glob patterns can resolve to the same parent dir (e.g.
+	# `dir:/dev/???/marker-a` and `dir:/dev/???/marker-b` both yielding
+	# `/dev/<hash>`), and the kernel's MAX_HIDE_TARGETS is finite, so we
+	# don't want to burn slots on duplicates.
+	case ",$TARGET_PATHS," in
+		*,"$CANDIDATE_PATH",*)
+			return
+			;;
+	esac
+
+	if [ -z "$TARGET_PATHS" ]; then
+		TARGET_PATHS="$CANDIDATE_PATH"
+	else
+		TARGET_PATHS="$TARGET_PATHS,$CANDIDATE_PATH"
+	fi
+}
+
+# Discover the complete debugfs mount path used by recent Scene versions.
+# Names below /dev are random on every boot, so identify the mount by both
+# filesystem type and SELinux context. Only paths visible in our own mount
+# namespace are usable: module init resolves targets in the insmod caller's
+# namespace through kern_path().
+discover_scene_debugfs() {
+	SCENE_DEBUGFS_PATHS=""
+	SCENE_DEBUGFS_COUNT=0
+	SCENE_DEBUGFS_STATUS=not-found
+	SCENE_DEBUGFS_SEEN=","
+
+	[ "$AUTO_SCENE_DEBUGFS" = "1" ] || {
+		SCENE_DEBUGFS_STATUS=disabled
+		return 1
+	}
+	[ "$SCENE_PACKAGE_STATUS" != "absent" ] || {
+		SCENE_DEBUGFS_STATUS=no-package
+		return 1
+	}
+	[ -r /proc/self/mountinfo ] || {
+		SCENE_DEBUGFS_STATUS=error
+		return 1
+	}
+
+	while IFS= read -r MOUNT_LINE || [ -n "$MOUNT_LINE" ]; do
+		case "$MOUNT_LINE" in
+			*' - '*) ;;
+			*) continue ;;
+		esac
+
+		MOUNT_LEFT="${MOUNT_LINE%% - *}"
+		MOUNT_RIGHT="${MOUNT_LINE#* - }"
+		set -- $MOUNT_LEFT
+		[ "$#" -ge 5 ] || continue
+		MOUNT_POINT="$5"
+		set -- $MOUNT_RIGHT
+		[ "$#" -ge 1 ] || continue
+		[ "$1" = "debugfs" ] || continue
+
+		case "$MOUNT_POINT" in
+			/dev/*) ;;
+			*) continue ;;
+		esac
+		case "$MOUNT_POINT" in
+			*'..'*|*','*|*' '*|*\\*) continue ;;
+		esac
+		[ "${#MOUNT_POINT}" -lt 256 ] || continue
+		[ -e "$MOUNT_POINT" ] || continue
+
+		MOUNT_CONTEXT="$(stat -c '%C' "$MOUNT_POINT" 2>/dev/null | head -n 1 | tr -d '\r')"
+		[ "$MOUNT_CONTEXT" = "u:object_r:debugfs:s0" ] || continue
+		case "$SCENE_DEBUGFS_SEEN" in
+			*,"$MOUNT_POINT",*) continue ;;
+		esac
+		SCENE_DEBUGFS_SEEN="$SCENE_DEBUGFS_SEEN$MOUNT_POINT,"
+
+		add_target_path "$MOUNT_POINT"
+		log_i "auto-discovered Scene debugfs mount: $MOUNT_POINT"
+		if [ -z "$SCENE_DEBUGFS_PATHS" ]; then
+			SCENE_DEBUGFS_PATHS="$MOUNT_POINT"
+		else
+			SCENE_DEBUGFS_PATHS="$SCENE_DEBUGFS_PATHS
+$MOUNT_POINT"
+		fi
+		SCENE_DEBUGFS_COUNT=$((SCENE_DEBUGFS_COUNT + 1))
+		if [ "$SCENE_DEBUGFS_COUNT" -ge 8 ]; then
+			log_i "Scene debugfs discovery reached safety limit (8 mounts)"
+			break
+		fi
+	done < /proc/self/mountinfo
+
+	if [ "$SCENE_DEBUGFS_COUNT" -gt 0 ]; then
+		SCENE_DEBUGFS_STATUS=found
+		return 0
+	fi
+	return 1
+}
+
+start_scene_debugfs_watcher() {
+	APPLIED_ENABLED="$1"
+
+	[ "$AUTO_SCENE_DEBUGFS" = "1" ] || return
+	[ "$SCENE_PACKAGE_STATUS" != "absent" ] || return
+	[ "$SCENE_DEBUGFS_COUNT" -eq 0 ] || return
+	[ -f "$SCENE_WATCH_SCRIPT" ] || {
+		log_i "Scene debugfs late watcher is missing: $SCENE_WATCH_SCRIPT"
+		return
+	}
+	[ "${PATHMASK_SCENE_WATCH_RELOAD:-0}" != "1" ] || return
+
+	write_scene_debugfs_state "late-watching" "$APPLIED_ENABLED" "initial scan found no mount; detached background watcher starting"
+	if command -v setsid >/dev/null 2>&1; then
+		PATHMASK_SCENE_APPLIED="$APPLIED_ENABLED" setsid sh "$SCENE_WATCH_SCRIPT" </dev/null >/dev/null 2>&1 &
+	else
+		PATHMASK_SCENE_APPLIED="$APPLIED_ENABLED" sh "$SCENE_WATCH_SCRIPT" </dev/null >/dev/null 2>&1 &
+	fi
+	log_i "started Scene debugfs late watcher pid=$!"
+}
+
+# Configured raw lines (one per line of target_path.conf, unexpanded).
+# Wait/insmod logic re-expands these on every loop so newly-appeared
+# Scene-style /dev/<hash>/... paths get picked up between boot phases.
+TARGET_RAW_LINES=""
+
+add_target_raw_line() {
+	RAW_LINE="$1"
+
+	[ -z "$RAW_LINE" ] && return
+
+	if [ -z "$TARGET_RAW_LINES" ]; then
+		TARGET_RAW_LINES="$RAW_LINE"
+	else
+		TARGET_RAW_LINES="$TARGET_RAW_LINES
+$RAW_LINE"
+	fi
+}
+
+# Strip an optional `any:<group>:` prefix from a raw config line.
+# Sets the global GROUP_ID to the group name (or empty for ungrouped
+# lines) and prints the remainder. Used by is_glob_line(),
+# expand_target_line(), and the wait/probe helpers so the rest of
+# the code never has to think about the prefix.
+#
+# Group semantics: every ungrouped line must resolve on its own; a
+# group is satisfied if *any* line bearing the same `any:<group>:`
+# prefix resolves. The boot wait completes the moment all ungrouped
+# lines exist AND every group has at least one member resolving.
+# This lets the bundled defaults ship with two Scene targets
+# (8.x literal /dev/scene + 9.3+ glob dir:/dev/???/scene_mode_category)
+# joined into one OR group, so a device running either Scene version
+# (or neither) doesn't burn the wait timeout on the missing one.
+strip_group_prefix() {
+	IN="$1"
+	GROUP_ID=""
+	case "$IN" in
+		any:*:*)
+			REST="${IN#any:}"
+			GROUP_ID="${REST%%:*}"
+			REST="${REST#*:}"
+			printf '%s' "$REST"
+			return
+			;;
+	esac
+	printf '%s' "$IN"
+}
+
+# Returns 0 if the raw config line is a glob (contains the `???` marker
+# or any of the standard shell glob metachars `?` `*` `[`), 1 otherwise.
+# We accept `???` as a user-friendly synonym for `*` (matches any single
+# path segment) because shell `*` in path context still doesn't cross
+# `/`, and a literal `*` in a config file looks alarming. See
+# expand_target_line() for the substitution.
+is_glob_line() {
+	LINE="$1"
+	# Strip optional `any:<group>:` first, then `dir:`, before
+	# detecting glob metachars.
+	LINE="$(strip_group_prefix "$LINE")"
+	case "$LINE" in
+		dir:*) LINE="${LINE#dir:}" ;;
+	esac
+	case "$LINE" in
+		*'???'*|*'*'*|*'?'*|*'['*) return 0 ;;
+	esac
+	return 1
+}
+
+# Expand a single raw config line into one or more literal paths and
+# add each to TARGET_PATHS. Recognises:
+#   - `dir:` prefix → emit the parent directory of each match
+#   - `???`         → replaced with `*` (any non-`/` characters)
+#   - shell `?`/`*`/`[abc]` → forwarded to shell glob unchanged
+# A line without any glob markers is treated as a literal path. Glob
+# lines that match nothing are silently skipped (this is normal: the
+# bundled Scene 9.3.0 default doesn't match on devices without Scene).
+expand_target_line() {
+	RAW="$1"
+	USE_PARENT=0
+
+	# Strip optional `any:<group>:` first; the group prefix exists
+	# only for the boot-time wait grouping and is invisible to the
+	# kernel (the kernel hides paths regardless of which OR group
+	# they belonged to in the conf).
+	RAW="$(strip_group_prefix "$RAW")"
+
+	case "$RAW" in
+		dir:*)
+			USE_PARENT=1
+			RAW="${RAW#dir:}"
+			;;
+	esac
+
+	[ -z "$RAW" ] && return
+
+	# Translate the friendly `???` marker into the shell-glob `*`. We do
+	# this via parameter substitution rather than `sed` so it works in
+	# the early boot environment where /system/bin/sed is not yet
+	# guaranteed to be on PATH (depends on init order / SELinux phase).
+	PATTERN="$RAW"
+	while :; do
+		case "$PATTERN" in
+			*'???'*) PATTERN="${PATTERN%%'???'*}*${PATTERN#*'???'}" ;;
+			*) break ;;
+		esac
+	done
+
+	if is_glob_line "$RAW"; then
+		# Use shell pathname expansion. set -- relies on the script not
+		# having `set -f` enabled (we don't), and the splitting respects
+		# the default IFS for whitespace-free path components.
+		# `printf '%s\n'` collapses multiple matches into one-per-line so
+		# we can iterate even when paths contain glob chars themselves.
+		# shellcheck disable=SC2086
+		set -- $PATTERN
+		for MATCH in "$@"; do
+			# Glob with no matches yields the literal pattern back. Skip
+			# anything that still looks like a pattern.
+			case "$MATCH" in
+				*'*'*|*'?'*|*'['*) continue ;;
+			esac
+			# Existence guard: glob match doesn't imply readable file
+			# (e.g. dangling).
+			[ -e "$MATCH" ] || continue
+			if [ "$USE_PARENT" = "1" ]; then
+				PARENT="${MATCH%/*}"
+				[ -z "$PARENT" ] && PARENT="/"
+				add_target_path "$PARENT"
+			else
+				add_target_path "$MATCH"
+			fi
+		done
+	else
+		# Literal path. The `dir:` prefix is unusual on a literal path
+		# (the user is asking us to hide its parent rather than itself),
+		# but we honour it for orthogonality.
+		if [ "$USE_PARENT" = "1" ]; then
+			PARENT="${PATTERN%/*}"
+			[ -z "$PARENT" ] && PARENT="/"
+			add_target_path "$PARENT"
+		else
+			add_target_path "$PATTERN"
+		fi
+	fi
+}
+
+# Re-expand every raw line into TARGET_PATHS from scratch. Called once
+# at startup and again on every wait loop so newly-mounted dynamic
+# paths (Scene 9.3.0 mounts a randomised /dev/<hash>/debug late in
+# boot) get picked up without restarting the boot script.
+rebuild_target_paths() {
+	TARGET_PATHS=""
+	OLD_IFS="$IFS"
+	IFS="
+"
+	for RAW in $TARGET_RAW_LINES; do
+		IFS="$OLD_IFS"
+		expand_target_line "$RAW"
+		IFS="
+"
+	done
+	IFS="$OLD_IFS"
+	discover_scene_debugfs || true
+}
+
+add_deny_uid() {
+	CANDIDATE_UID="$1"
+
+	case "$CANDIDATE_UID" in
+		''|*[!0-9]*)
+			return
+			;;
+	esac
+
+	case ",$DENY_UIDS," in
+		*,"$CANDIDATE_UID",*)
+			return
+			;;
+	esac
+
+	if [ -z "$DENY_UIDS" ]; then
+		DENY_UIDS="$CANDIDATE_UID"
+	else
+		DENY_UIDS="$DENY_UIDS,$CANDIDATE_UID"
+	fi
+}
+
+package_to_uid_from_packages_list() {
+	PACKAGE_NAME="$1"
+	PACKAGES_LIST="/data/system/packages.list"
+
+	[ -f "$PACKAGES_LIST" ] || return
+
+	while IFS= read -r PACKAGE_LINE || [ -n "$PACKAGE_LINE" ]; do
+		set -- $PACKAGE_LINE
+		[ "$1" = "$PACKAGE_NAME" ] || continue
+
+		case "$2" in
+			''|*[!0-9]*)
+				return
+				;;
+			*)
+				printf '%s\n' "$2"
+				return
+				;;
+		esac
+	done < "$PACKAGES_LIST"
+}
+
+package_to_uid_from_data_dir() {
+	PACKAGE_NAME="$1"
+
+	for DATA_DIR in "/data/user/0/$PACKAGE_NAME" "/data/data/$PACKAGE_NAME"; do
+		[ -d "$DATA_DIR" ] || continue
+
+		DATA_UID="$(stat -c '%u' "$DATA_DIR" 2>/dev/null || true)"
+		case "$DATA_UID" in
+			''|*[!0-9]*)
+				;;
+			*)
+				printf '%s\n' "$DATA_UID"
+				return
+				;;
+		esac
+
+		DATA_LINE="$(ls -ldn "$DATA_DIR" 2>/dev/null || true)"
+		set -- $DATA_LINE
+		case "$3" in
+			''|*[!0-9]*)
+				;;
+			*)
+				printf '%s\n' "$3"
+				return
+				;;
+		esac
+	done
+}
+
+package_to_uid_from_pm() {
+	PACKAGE_NAME="$1"
+	PACKAGE_LINES="$(
+		cmd package list packages --user 0 -U "$PACKAGE_NAME" 2>/dev/null || true
+		pm list packages --user 0 -U "$PACKAGE_NAME" 2>/dev/null || true
+		cmd package list packages -U "$PACKAGE_NAME" 2>/dev/null || true
+		pm list packages -U "$PACKAGE_NAME" 2>/dev/null || true
+	)"
+
+	printf '%s\n' "$PACKAGE_LINES" |
+	while IFS= read -r PACKAGE_LINE; do
+		case "$PACKAGE_LINE" in
+			package:*" uid:"*)
+				;;
+			*)
+				continue
+				;;
+		esac
+
+		LINE_PKG="${PACKAGE_LINE#package:}"
+		LINE_PKG="${LINE_PKG%% uid:*}"
+		LINE_UID="${PACKAGE_LINE##* uid:}"
+		LINE_UID="${LINE_UID%% *}"
+
+		if [ "$LINE_PKG" = "$PACKAGE_NAME" ] &&
+		   [ "$LINE_UID" != "$PACKAGE_LINE" ]; then
+			printf '%s\n' "$LINE_UID"
+			break
+		fi
+	done
+}
+
+package_to_uid() {
+	RESOLVED_PACKAGE_UID="$(package_to_uid_from_packages_list "$1" | head -n 1)"
+	if [ -n "$RESOLVED_PACKAGE_UID" ]; then
+		printf '%s\n' "$RESOLVED_PACKAGE_UID"
+		return
+	fi
+
+	RESOLVED_PACKAGE_UID="$(package_to_uid_from_pm "$1" | head -n 1)"
+	if [ -n "$RESOLVED_PACKAGE_UID" ]; then
+		printf '%s\n' "$RESOLVED_PACKAGE_UID"
+		return
+	fi
+
+	package_to_uid_from_data_dir "$1" | head -n 1
+}
+
+read_scope_uid_config() {
+	UID_CONFIG="$1"
+	[ -f "$UID_CONFIG" ] || return
+
+	while IFS= read -r CONFIG_LINE || [ -n "$CONFIG_LINE" ]; do
+		CONFIG_LINE="$(printf '%s' "$CONFIG_LINE" | tr -d '\r')"
+		case "$CONFIG_LINE" in
+			''|\#*)
+				continue
+				;;
+		esac
+		OLD_IFS="$IFS"
+		IFS=","
+		for UID_ITEM in $CONFIG_LINE; do
+			IFS="$OLD_IFS"
+			UID_ITEM="$(printf '%s' "$UID_ITEM" | tr -d ' ')"
+			add_deny_uid "$UID_ITEM"
+			IFS=","
+		done
+		IFS="$OLD_IFS"
+	done < "$UID_CONFIG"
+}
+
+read_scope_package_config() {
+	PACKAGE_CONFIG="$1"
+	QUIET="$2"
+	UNRESOLVED_PACKAGES=0
+	[ -f "$PACKAGE_CONFIG" ] || return
+
+	while IFS= read -r CONFIG_LINE || [ -n "$CONFIG_LINE" ]; do
+		CONFIG_LINE="$(printf '%s' "$CONFIG_LINE" | tr -d '\r ')"
+		case "$CONFIG_LINE" in
+			''|\#*)
+				continue
+				;;
+		esac
+		PACKAGE_UID="$(package_to_uid "$CONFIG_LINE" | head -n 1)"
+		if [ -n "$PACKAGE_UID" ]; then
+			add_deny_uid "$PACKAGE_UID"
+			[ "$QUIET" = "1" ] || log_i "resolved $CONFIG_LINE uid=$PACKAGE_UID"
+		else
+			UNRESOLVED_PACKAGES=$((UNRESOLVED_PACKAGES + 1))
+			[ "$QUIET" = "1" ] || log_i "could not resolve package UID: $CONFIG_LINE"
+		fi
+	done < "$PACKAGE_CONFIG"
+}
+
+read_deny_uid_config() {
+	read_scope_uid_config "$DENY_UIDS_CONFIG"
+}
+
+read_deny_package_config() {
+	read_scope_package_config "$DENY_PACKAGES_CONFIG" "$1"
+}
+
+read_active_uid_config() {
+	if [ "$SCOPE_MODE" = "allow" ]; then
+		read_scope_uid_config "$ALLOW_SYSTEM_UIDS_CONFIG"
+		read_scope_uid_config "$ALLOW_UIDS_CONFIG"
+	else
+		read_scope_uid_config "$DENY_UIDS_CONFIG"
+	fi
+}
+
+read_active_package_config() {
+	if [ "$SCOPE_MODE" = "allow" ]; then
+		read_scope_package_config "$ALLOW_PACKAGES_CONFIG" "$1"
+	else
+		read_scope_package_config "$DENY_PACKAGES_CONFIG" "$1"
+	fi
+}
+
+any_target_exists() {
+	OLD_IFS="$IFS"
+	IFS=","
+	for TARGET_ITEM in $TARGET_PATHS; do
+		IFS="$OLD_IFS"
+		if [ -e "$TARGET_ITEM" ]; then
+			return 0
+		fi
+		IFS=","
+	done
+	IFS="$OLD_IFS"
+	return 1
+}
+
+# Probe a single raw config line: returns 0 if it currently resolves
+# to at least one existing path, 1 otherwise. Handles all three
+# layers in order: any:<group>: prefix stripping, dir: prefix
+# stripping, and ??? -> * + shell glob expansion. For glob lines
+# we count "at least one match exists" as resolved; for literal
+# lines a plain `[ -e ]` is enough.
+raw_line_resolves() {
+	IN="$1"
+	IN="$(strip_group_prefix "$IN")"
+	case "$IN" in
+		dir:*) IN="${IN#dir:}" ;;
+	esac
+
+	# Translate ??? -> * via parameter substitution (no sed
+	# dependency at boot, same as expand_target_line).
+	PROBE="$IN"
+	while :; do
+		case "$PROBE" in
+			*'???'*) PROBE="${PROBE%%'???'*}*${PROBE#*'???'}" ;;
+			*) break ;;
+		esac
+	done
+
+	case "$PROBE" in
+		*'*'*|*'?'*|*'['*)
+			# Glob form: probe resolves iff the first iteration
+			# of the for-loop sees an existing path. Without
+			# nullglob we have to short-circuit manually because
+			# an empty match returns the literal pattern.
+			# shellcheck disable=SC2086
+			set -- $PROBE
+			for M in "$@"; do
+				case "$M" in
+					*'*'*|*'?'*|*'['*) continue ;;
+				esac
+				[ -e "$M" ] && return 0
+			done
+			return 1
+			;;
+		*)
+			[ -e "$PROBE" ] && return 0
+			return 1
+			;;
+	esac
+}
+
+# all_literal_targets_exist: every ungrouped raw line must resolve,
+# AND every distinct any:<group>: must have at least one member that
+# resolves. Glob lines that match nothing are skipped only if they
+# are *grouped* (a glob line outside a group still must match -- the
+# user explicitly asked for it, no fallback).
+#
+# Loop runs entirely against TARGET_RAW_LINES so we re-check every
+# wait iteration; this catches Scene mounting its randomised
+# /dev/<hash>/debug late in boot without us having to keep state.
+all_literal_targets_exist() {
+	# A group is "satisfied" when at least one member resolves.
+	# We track this in a comma-separated allowlist: SATISFIED_GROUPS.
+	# Two passes: first collect the set of unsatisfied groups (any
+	# group with zero resolving members), then verify every
+	# ungrouped line. This avoids backtracking and keeps the cost
+	# linear in the conf size.
+	SATISFIED_GROUPS=","
+	SEEN_GROUPS=","
+	OLD_IFS="$IFS"
+	IFS="
+"
+
+	# Pass 1: scan grouped lines, mark groups satisfied as soon as
+	# any member resolves.
+	for RAW in $TARGET_RAW_LINES; do
+		IFS="$OLD_IFS"
+		case "$RAW" in
+			any:*:*)
+				REST="${RAW#any:}"
+				GID="${REST%%:*}"
+				case ",$SEEN_GROUPS" in
+					*",$GID,"*) ;;
+					*) SEEN_GROUPS="$SEEN_GROUPS$GID," ;;
+				esac
+				case ",$SATISFIED_GROUPS" in
+					*",$GID,"*)
+						# This group already has a member that
+						# resolved; skip the rest of its members.
+						;;
+					*)
+						if raw_line_resolves "$RAW"; then
+							SATISFIED_GROUPS="$SATISFIED_GROUPS$GID,"
+						fi
+						;;
+				esac
+				;;
+		esac
+		IFS="
+"
+	done
+
+	# Any group seen but never satisfied means the wait must
+	# continue.
+	IFS=","
+	for GID in ${SEEN_GROUPS#,}; do
+		IFS="$OLD_IFS"
+		[ -z "$GID" ] && continue
+		case ",$SATISFIED_GROUPS" in
+			*",$GID,"*) ;;
+			*)
+				IFS="$OLD_IFS"
+				return 1
+				;;
+		esac
+		IFS=","
+	done
+	IFS="
+"
+
+	# Pass 2: every ungrouped raw line must resolve.
+	for RAW in $TARGET_RAW_LINES; do
+		IFS="$OLD_IFS"
+		case "$RAW" in
+			any:*:*)
+				IFS="
+"
+				continue
+				;;
+		esac
+		# Glob lines outside a group: still must match (user-asked,
+		# no fallback). This preserves the v2.2.8 behaviour for
+		# top-level glob lines like a manually added
+		# /dev/proc-???/something line.
+		if is_glob_line "$RAW"; then
+			IFS="
+"
+			continue
+		fi
+		if ! raw_line_resolves "$RAW"; then
+			IFS="$OLD_IFS"
+			return 1
+		fi
+		IFS="
+"
+	done
+	IFS="$OLD_IFS"
+	return 0
+}
+
+log_missing_targets() {
+	# Walk every raw line. For grouped lines we report once per
+	# group ("group <gid> currently has no satisfying member") only
+	# if the group has zero resolving members. Ungrouped glob lines
+	# log "glob line currently has no matches"; ungrouped literal
+	# lines log "literal target still missing".
+	GROUP_DONE=","
+	OLD_IFS="$IFS"
+	IFS="
+"
+	for RAW in $TARGET_RAW_LINES; do
+		IFS="$OLD_IFS"
+		case "$RAW" in
+			any:*:*)
+				REST="${RAW#any:}"
+				GID="${REST%%:*}"
+				case ",$GROUP_DONE" in
+					*",$GID,"*)
+						# Already reported for this group, skip.
+						IFS="
+"
+						continue
+						;;
+				esac
+				# Re-scan all members of this group; if at least one
+				# resolves, the group is satisfied (no log). Else log
+				# once with a brief description of the group's lines.
+				ANY_OK=0
+				IFS="
+"
+				for INNER in $TARGET_RAW_LINES; do
+					IFS="$OLD_IFS"
+					case "$INNER" in
+						any:"$GID":*)
+							if raw_line_resolves "$INNER"; then
+								ANY_OK=1
+								break
+							fi
+							;;
+					esac
+					IFS="
+"
+				done
+				IFS="$OLD_IFS"
+				if [ "$ANY_OK" = "0" ]; then
+					log_i "group '$GID' currently has no resolving member, kernel will not see this group's targets until one appears"
+				fi
+				GROUP_DONE="$GROUP_DONE$GID,"
+				;;
+			*)
+				if is_glob_line "$RAW"; then
+					if ! raw_line_resolves "$RAW"; then
+						log_i "glob line currently has no matches: $RAW"
+					fi
+				else
+					PROBE="$RAW"
+					case "$PROBE" in
+						dir:*) PROBE="${PROBE#dir:}" ;;
+					esac
+					if [ ! -e "$PROBE" ]; then
+						log_i "literal target still missing, kernel will skip: $PROBE"
+					fi
+				fi
+				;;
+		esac
+		IFS="
+"
+	done
+	IFS="$OLD_IFS"
+}
+
+wait_for_targets() {
+	END="$1"
+
+	write_boot_state "waiting-targets" "$TARGET_RAW_LINES" "$END"
+	if [ "$AUTO_SCENE_DEBUGFS" = "1" ]; then
+		write_scene_debugfs_state "waiting" "0" "waiting for /dev debugfs mount"
+	fi
+
+	while :; do
+		# Re-expand every iteration so a Scene boot that mounts the
+		# randomised /dev/<hash>/debug late in boot is picked up as
+		# soon as it appears, without having to wait for the literal
+		# /dev/scene fallback to also resolve.
+		rebuild_target_paths
+		STATIC_TARGETS_READY=0
+		ANY_TARGET_READY=0
+		all_literal_targets_exist && STATIC_TARGETS_READY=1
+		any_target_exists && ANY_TARGET_READY=1
+		# Scene auto-discovery is additive. When another required target is
+		# already usable, do not hold the foreground service open waiting for
+		# Scene's late boot mount; load now and let the detached watcher add it.
+		# If Scene is the only possible target, ANY_TARGET_READY stays zero and
+		# the existing shared deadline still protects the auto-only setup.
+		if [ "$STATIC_TARGETS_READY" = "1" ] && [ "$ANY_TARGET_READY" = "1" ]; then
+			if [ "$AUTO_SCENE_DEBUGFS" = "1" ]; then
+				if [ "$SCENE_DEBUGFS_COUNT" -gt 0 ]; then
+					write_scene_debugfs_state "found" "0" "discovered $SCENE_DEBUGFS_COUNT matching mount(s)"
+				elif [ "$SCENE_PACKAGE_STATUS" = "absent" ]; then
+					write_scene_debugfs_state "no-package" "0" "$SCENE_PACKAGE is not installed; discovery skipped"
+				else
+					write_scene_debugfs_state "not-found" "0" "initial scan found no mount; loading other targets without waiting"
+				fi
+			fi
+			return 0
+		fi
+		NOW="$(date +%s 2>/dev/null || echo 0)"
+		[ "$NOW" -ge "$END" ] && break
+		sleep 1
+	done
+
+	# Final expansion before deciding what to load.
+	rebuild_target_paths
+	log_missing_targets
+	if [ "$AUTO_SCENE_DEBUGFS" = "1" ]; then
+		if [ "$SCENE_DEBUGFS_COUNT" -gt 0 ]; then
+			write_scene_debugfs_state "found" "0" "discovered $SCENE_DEBUGFS_COUNT matching mount(s)"
+		else
+			write_scene_debugfs_state "$SCENE_DEBUGFS_STATUS" "0" "no matching /dev debugfs mount before timeout"
+			log_i "Scene debugfs auto-discovery found no matching mount before timeout"
+		fi
+	fi
+	# The kernel is happy to load with a partial target set; only bail
+	# if literally nothing exists at all.
+	any_target_exists
+}
+
+wait_for_scope_packages() {
+	END="$1"
+
+	write_boot_state "waiting-packages" "" "$END"
+
+	while :; do
+		DENY_UIDS=""
+		read_active_uid_config
+		read_active_package_config 1
+		if [ "$UNRESOLVED_PACKAGES" -eq 0 ]; then
+			read_active_package_config 0
+			return 0
+		fi
+		NOW="$(date +%s 2>/dev/null || echo 0)"
+		[ "$NOW" -ge "$END" ] && break
+		sleep 1
+	done
+
+	DENY_UIDS=""
+	read_active_uid_config
+	read_active_package_config 0
+}
+
+init_persistent_config
+
+# Pause writes a stop sentinel before unloading so the background watcher
+# cannot race it and restore the module. A normal boot or explicit WebUI hot
+# reload starts a fresh service run and clears the sentinel. An internal late-
+# watcher reload must respect it and abort.
+if [ "${PATHMASK_SCENE_WATCH_RELOAD:-0}" = "1" ] && [ -e "$SCENE_WATCH_STOP_PATH" ]; then
+	log_i "Scene debugfs watcher reload cancelled by pause sentinel"
+	exit 0
+fi
+if [ "${PATHMASK_SCENE_WATCH_RELOAD:-0}" != "1" ]; then
+	rm -f "$SCENE_WATCH_STOP_PATH" 2>/dev/null || true
+fi
+write_boot_state "init" "" ""
+
+if [ -n "${PATHMASK_LOAD_FAIL_LIMIT:-}" ]; then
+	LOAD_FAIL_LIMIT="$PATHMASK_LOAD_FAIL_LIMIT"
+fi
+
+case "$LOAD_FAIL_LIMIT" in
+	''|*[!0-9]*|0)
+		LOAD_FAIL_LIMIT=3
+		;;
+esac
+
+if [ "${PATHMASK_RESET_FAIL_GUARD:-0}" = "1" ]; then
+	reset_load_failure_guard
+	log_i "reset load failure guard"
+fi
+
+if should_skip_after_load_failures; then
+	write_boot_state "skipped-fail-guard" "consecutive insmod failures" ""
+	exit 0
+fi
+
+if [ -f "$AUTO_SCENE_DEBUGFS_CONFIG" ]; then
+	AUTO_SCENE_DEBUGFS="$(head -n 1 "$AUTO_SCENE_DEBUGFS_CONFIG" | tr -d '\r ')"
+fi
+case "$AUTO_SCENE_DEBUGFS" in
+	1|true|True|yes|Yes|on|On) AUTO_SCENE_DEBUGFS=1 ;;
+	*) AUTO_SCENE_DEBUGFS=0 ;;
+esac
+if [ "$AUTO_SCENE_DEBUGFS" = "1" ]; then
+	detect_scene_package_status
+	if [ "$SCENE_PACKAGE_STATUS" = "absent" ]; then
+		SCENE_DEBUGFS_STATUS=no-package
+		write_scene_debugfs_state "no-package" "0" "$SCENE_PACKAGE is not installed; discovery skipped"
+		log_i "Scene debugfs auto-discovery skipped: $SCENE_PACKAGE is not installed"
+	fi
+else
+	SCENE_DEBUGFS_STATUS=disabled
+	write_scene_debugfs_state "disabled" "0" ""
+fi
+
+if [ -f "$CONFIG_PATH" ]; then
+	while IFS= read -r CONFIG_LINE || [ -n "$CONFIG_LINE" ]; do
+		CONFIG_LINE="$(printf '%s' "$CONFIG_LINE" | tr -d '\r')"
+		case "$CONFIG_LINE" in
+			''|\#*)
+				continue
+				;;
+		esac
+		add_target_raw_line "$CONFIG_LINE"
+	done < "$CONFIG_PATH"
+	# Initial expansion. wait_for_targets() will rebuild on every loop
+	# iteration so glob lines stay current.
+	rebuild_target_paths
+fi
+
+if [ -f "$HIDE_DIRENTS_CONFIG" ]; then
+	HIDE_DIRENTS="$(head -n 1 "$HIDE_DIRENTS_CONFIG" | tr -d '\r')"
+fi
+
+if [ -f "$SCOPE_MODE_CONFIG" ]; then
+	SCOPE_MODE="$(head -n 1 "$SCOPE_MODE_CONFIG" | tr -d '\r ')"
+fi
+
+if [ -f "$WAIT_SECONDS_CONFIG" ]; then
+	WAIT_SECONDS="$(head -n 1 "$WAIT_SECONDS_CONFIG" | tr -d '\r ')"
+fi
+
+if [ -f "$ENABLE_SYSCALL_HOOKS_CONFIG" ]; then
+	ENABLE_SYSCALL_HOOKS="$(head -n 1 "$ENABLE_SYSCALL_HOOKS_CONFIG" | tr -d '\r ')"
+fi
+
+# write_op_policy.conf: pathmask write-class syscall policy
+# (passthrough / eacces / enoent). Passed to insmod verbatim after
+# validation; unknown values fall back to passthrough.
+if [ -f "$WRITE_OP_POLICY_CONFIG" ]; then
+	WRITE_OP_POLICY="$(head -n 1 "$WRITE_OP_POLICY_CONFIG" | tr -d '\r ')"
+fi
+case "$WRITE_OP_POLICY" in
+	passthrough|eacces|enoent) ;;
+	*)
+		log_i "unsupported write_op_policy=$WRITE_OP_POLICY, fallback to passthrough"
+		WRITE_OP_POLICY=passthrough
+		;;
+esac
+
+# syscall_hooks.conf: comma-separated allowlist of __arm64_sys_*
+# probes to register. Tolerates either a single line of tokens
+# (comma-separated) or one token per line. Empty / missing means
+# "fall back to legacy behaviour (= ENABLE_SYSCALL_HOOKS as bool)".
+if [ -f "$SYSCALL_HOOKS_CONFIG" ]; then
+	SYSCALL_HOOKS=""
+	while IFS= read -r SYSCALL_HOOKS_LINE || [ -n "$SYSCALL_HOOKS_LINE" ]; do
+		SYSCALL_HOOKS_LINE="$(printf '%s' "$SYSCALL_HOOKS_LINE" | tr -d '\r ')"
+		case "$SYSCALL_HOOKS_LINE" in
+			''|\#*)
+				continue
+				;;
+		esac
+		if [ -z "$SYSCALL_HOOKS" ]; then
+			SYSCALL_HOOKS="$SYSCALL_HOOKS_LINE"
+		else
+			SYSCALL_HOOKS="$SYSCALL_HOOKS,$SYSCALL_HOOKS_LINE"
+		fi
+	done < "$SYSCALL_HOOKS_CONFIG"
+fi
+
+if [ -n "${PATHMASK_WAIT_SECONDS:-}" ]; then
+	WAIT_SECONDS="$PATHMASK_WAIT_SECONDS"
+fi
+
+case "$WAIT_SECONDS" in
+	''|*[!0-9]*)
+		WAIT_SECONDS=60
+		;;
+esac
+
+case "$SCOPE_MODE" in
+	deny|allow|global)
+		;;
+	*)
+		log_i "unsupported scope_mode=$SCOPE_MODE, fallback to global"
+		SCOPE_MODE=global
+		;;
+esac
+
+case "$HIDE_DIRENTS" in
+	0|false|False|no|No)
+		HIDE_DIRENTS=0
+		;;
+	*)
+		HIDE_DIRENTS=1
+		;;
+esac
+
+case "$ENABLE_SYSCALL_HOOKS" in
+	1|true|True|yes|Yes|on|On)
+		ENABLE_SYSCALL_HOOKS=1
+		;;
+	*)
+		ENABLE_SYSCALL_HOOKS=0
+		;;
+esac
+
+# Compose the final syscall_hooks string passed to insmod from the
+# two-layer model the WebUI exposes:
+#   - ENABLE_SYSCALL_HOOKS = master toggle (panel checkbox)
+#   - SYSCALL_HOOKS        = which 7 sub-probes the user picked
+# When the master toggle is off we explicitly send "none" so the
+# kernel doesn't fall through to the legacy enable_syscall_hooks
+# boolean (which would behave as "all 7" when set to 1 prior to
+# v2.4). When the master toggle is on but the per-probe list is
+# empty we keep "all" semantics for backward-compat with old configs
+# that only had the bool.
+if [ "$ENABLE_SYSCALL_HOOKS" = "0" ]; then
+	SYSCALL_HOOKS="none"
+elif [ -z "$SYSCALL_HOOKS" ]; then
+	SYSCALL_HOOKS="all"
+fi
+
+if [ -z "$TARGET_RAW_LINES" ] && [ "$AUTO_SCENE_DEBUGFS" = "0" ]; then
+	log_e "empty target path list"
+	write_boot_state "skipped-empty-targets" "no path configured" ""
+	exit 1
+fi
+
+if [ ! -f "$KO_PATH" ]; then
+	log_e "missing module: $KO_PATH"
+	record_load_failure "missing module: $KO_PATH"
+	write_boot_state "failed-missing-ko" "$KO_PATH" ""
+	exit 1
+fi
+
+# A normal boot keeps the conservative 10-second settle delay. WebUI and the
+# detached Scene late watcher run after Android is already up, so they override
+# this to zero instead of paying the same boot-only delay on every reload.
+INITIAL_DELAY_SECONDS="${PATHMASK_INITIAL_DELAY_SECONDS:-10}"
+case "$INITIAL_DELAY_SECONDS" in
+	''|*[!0-9]*) INITIAL_DELAY_SECONDS=10 ;;
+esac
+if [ "$INITIAL_DELAY_SECONDS" -gt 0 ]; then
+	sleep "$INITIAL_DELAY_SECONDS"
+fi
+
+WAIT_DEADLINE=$(( $(date +%s 2>/dev/null || echo 0) + WAIT_SECONDS ))
+
+if ! wait_for_targets "$WAIT_DEADLINE"; then
+	log_i "no configured targets exist, skip loading"
+	write_boot_state "skipped-targets-missing" "$TARGET_PATHS" ""
+	start_scene_debugfs_watcher "0"
+	exit 0
+fi
+
+if [ "$SCOPE_MODE" = "deny" ] || [ "$SCOPE_MODE" = "allow" ]; then
+	wait_for_scope_packages "$WAIT_DEADLINE"
+	if [ -z "$DENY_UIDS" ]; then
+		if [ "$SCOPE_MODE" = "allow" ]; then
+			log_i "scope_mode=allow but no allow UIDs resolved, skip loading"
+			write_boot_state "skipped-no-uids" "allow mode without resolved UIDs" ""
+		else
+			log_i "scope_mode=deny but no deny UIDs resolved, skip loading"
+			write_boot_state "skipped-no-uids" "deny mode without resolved UIDs" ""
+		fi
+		exit 0
+	fi
+else
+	read_deny_uid_config
+	read_deny_package_config 0
+fi
+
+if grep -q '^pathmask ' /proc/modules 2>/dev/null; then
+	reset_load_failure_guard
+	log_i "pathmask is already loaded"
+	write_boot_state "already-loaded" "" ""
+	exit 0
+fi
+
+if grep -q '^nohello ' /proc/modules 2>/dev/null; then
+	log_i "legacy nohello module is loaded; unload it before loading pathmask"
+	write_boot_state "skipped-legacy-loaded" "legacy nohello in /proc/modules" ""
+	exit 0
+fi
+
+# UID resolution can consume the remainder of the shared wait deadline. Scan
+# one final time immediately before insmod to close the window where Scene
+# creates (or replaces) its randomized debugfs mount between target waiting
+# and module loading.
+rebuild_target_paths
+if ! any_target_exists; then
+	log_i "no targets exist after final pre-insmod scan, skip loading"
+	write_boot_state "skipped-targets-missing" "$TARGET_PATHS" ""
+	start_scene_debugfs_watcher "0"
+	exit 0
+fi
+if [ "$AUTO_SCENE_DEBUGFS" = "1" ] && [ "$SCENE_DEBUGFS_COUNT" -gt 0 ]; then
+	write_scene_debugfs_state "found" "0" "discovered $SCENE_DEBUGFS_COUNT matching mount(s) before insmod"
+fi
+
+# procguard companion module: strips the gid 3009 (AID_READPROC) /proc
+# bypass from Android isolated processes (LSPosed Privisolated). Opt-in
+# via procguard.conf (default 0, toggled from the WebUI); this script
+# seeds the persistent copy from the module-bundled default on first
+# boot and honours the persistent copy afterwards.
+if [ -f "$PROC_GUARD_KO_PATH" ] && [ "$(head -n 1 "$PROC_GUARD_CONFIG" 2>/dev/null | tr -d ' ')" = "1" ]; then
+	if grep -q '^procguard ' /proc/modules 2>/dev/null; then
+		log_i "procguard already loaded, skip"
+	elif insmod "$PROC_GUARD_KO_PATH"; then
+		log_i "loaded $PROC_GUARD_KO_PATH"
+	else
+		log_e "failed to load $PROC_GUARD_KO_PATH (continuing anyway)"
+	fi
+fi
+
+if insmod "$KO_PATH" target_paths="$TARGET_PATHS" hide_dirents="$HIDE_DIRENTS" scope_mode="$SCOPE_MODE" deny_uids="$DENY_UIDS" enable_syscall_hooks="$ENABLE_SYSCALL_HOOKS" syscall_hooks="$SYSCALL_HOOKS" write_op_policy="$WRITE_OP_POLICY"; then
+	reset_load_failure_guard
+	log_i "loaded $KO_PATH target_paths=$TARGET_PATHS hide_dirents=$HIDE_DIRENTS scope_mode=$SCOPE_MODE deny_uids=$DENY_UIDS enable_syscall_hooks=$ENABLE_SYSCALL_HOOKS syscall_hooks=$SYSCALL_HOOKS write_op_policy=$WRITE_OP_POLICY"
+	write_boot_state "loaded" "$TARGET_PATHS" ""
+	if [ "$AUTO_SCENE_DEBUGFS" = "1" ]; then
+		write_scene_debugfs_state "$SCENE_DEBUGFS_STATUS" "1" "discovered $SCENE_DEBUGFS_COUNT matching mount(s)"
+		start_scene_debugfs_watcher "1"
+	else
+		write_scene_debugfs_state "disabled" "0" ""
+	fi
+else
+	log_e "failed to load $KO_PATH"
+	record_load_failure "insmod failed: $KO_PATH"
+	write_boot_state "failed-insmod" "$KO_PATH" ""
+	exit 1
+fi

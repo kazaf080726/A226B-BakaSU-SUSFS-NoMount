@@ -49,6 +49,16 @@ BakaSU + SUSFS + NoMount kernel for Samsung Galaxy A22 5G (SM-A226B)
      用它的 WebUI 加载 `.kpm`
    - 固定使用 KPatch-Next `0.13.5-2` 的 kpimg/kptools
 
+6. PathMask 4.14（可选 KSU 模块）
+   - Andrea-lyz/LKM-PathMask v2.8.3 的 4.14 Non-GKI 移植，保留原版
+     service.sh、WebUI、配置项；内核态换成适配 4.14 的 `pathmask.ko`
+   - 钩 `__inode_permission`、`vfs_getattr_nosec`、`SyS_getdents64`，
+     并保留 stat/access/readlink 的 syscall fallback
+   - 附带 `procguard.ko`（gid 3009 / AID_READPROC 隔离修复）
+   - `.ko` 与内核同一次 CI 构建，vermagic/MODVERSIONS 必须配套使用
+   - 用法：刷内核后安装 `A226B-PathMask-4.14-*.zip`，在它的 WebUI 里
+     配置目标路径/UID
+
 三、没有移植 / 已知限制
 -----------------------
 - priority UID filter（getpriority 滥用检测对抗）：上游 2026-10 才加入，
@@ -90,7 +100,9 @@ KPM：KPatch-Next 0.13.5-2 的 kptools/kpimg（脚本内固定版本）。
 4. 安装 BakaSU 管理器 APK；再安装 NoMount 官方 Metamodule（可选）。
 5. KPM 版还需要安装 Release 里的 KPatch-Next-Module-v0.0.1.zip，
    之后在它的 WebUI 里加载 `.kpm`；不要再用它的“patch boot”功能。
-6. 若无法开机：进 TWRP 恢复备份的 stock boot.img，或 Odin 刷回原厂 AP；
+6. PathMask：安装 `A226B-PathMask-4.14-*.zip`（KSU 模块），重启后在它的
+   WebUI 里配置 target_path / scope_mode；`.ko` 必须与本次内核配套。
+7. 若无法开机：进 TWRP 恢复备份的 stock boot.img，或 Odin 刷回原厂 AP；
    KPM 版无法开机时先刷回标准版排除 KPM 因素。
 
 注意：
@@ -108,6 +120,7 @@ KPM：KPatch-Next 0.13.5-2 的 kptools/kpimg（脚本内固定版本）。
 - fs/nomount      -> ../NoMount/kernel/src（构建时 clone，不入库）
 - ci/             构建脚本
 - anykernel/      AnyKernel3 模板
+- pathmask/       PathMask 4.14 移植源码 + KSU 模块外壳
 - patches/        本仓库相对原厂源码的集成改动说明（见 patches/README.md）
 
 七、致谢
@@ -119,6 +132,7 @@ KPM：KPatch-Next 0.13.5-2 的 kptools/kpimg（脚本内固定版本）。
 - 4.14 Samsung 集成参考: betelqeyza
   https://github.com/betelqeyza/android_kernel_samsung_universal9611
 - NoMount: maxsteeel https://github.com/maxsteeel/nomount
+- PathMask: Andrea-lyz https://github.com/Andrea-lyz/LKM-PathMask
 - AnyKernel3: osm0sis https://github.com/osm0sis/AnyKernel3
 
 GPL-2.0，内核源码版权归 Samsung / 各原作者所有。

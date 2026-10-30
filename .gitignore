@@ -5,6 +5,14 @@
 /out-*/
 /dist/
 /.kpm-tools/
+/pathmask/src/*.ko
+/pathmask/src/*.o
+/pathmask/src/.*.cmd
+/pathmask/src/*.mod
+/pathmask/src/*.mod.c
+/pathmask/src/Module.symvers
+/pathmask/src/modules.order
+/pathmask/ksu-module/*.ko
 /include/generated/
 /arch/arm64/include/generated/
 /arch/arm/include/generated/

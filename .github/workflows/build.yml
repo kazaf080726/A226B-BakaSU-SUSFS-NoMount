@@ -76,6 +76,9 @@ jobs:
       - name: Package
         run: bash ci/package.sh
 
+      - name: Build PathMask LKM (4.14 port)
+        run: bash pathmask/build.sh
+
       - name: Patch KPM image
         run: bash ci/kpm_patch.sh
 
@@ -100,6 +103,7 @@ jobs:
           name: A226B-BakaSU-SUSFS-NoMount
           path: |
             dist/*.zip
+            dist/*.ko
             dist/Image.gz
             dist/Image.kpm.gz
           if-no-files-found: error
