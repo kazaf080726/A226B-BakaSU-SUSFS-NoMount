@@ -25,6 +25,8 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     timeout-minutes: 240
+    env:
+      KPATCH_TAG: 0.13.5-2
     steps:
       - name: Checkout kernel source
         uses: actions/checkout@v4
@@ -74,6 +76,18 @@ jobs:
       - name: Package
         run: bash ci/package.sh
 
+      - name: Patch KPM image
+        run: bash ci/kpm_patch.sh
+
+      - name: Package KPM variant
+        run: bash ci/package_kpm.sh
+
+      - name: Fetch KPatch-Next module
+        run: |
+          curl -fL --retry 3 -o dist/KPatch-Next-Module-v0.0.1.zip \
+            https://github.com/KernelSU-Next/KPatch-Next-Module/releases/download/v0.0.1/KPatch-Next-Module.zip
+          ls -lh dist
+
       - name: Show versions
         run: |
           echo "BakaSU: $(git -C KernelSU rev-parse HEAD)"
@@ -87,6 +101,7 @@ jobs:
           path: |
             dist/*.zip
             dist/Image.gz
+            dist/Image.kpm.gz
           if-no-files-found: error
           retention-days: 30
 
@@ -97,10 +112,15 @@ jobs:
           files: |
             dist/*.zip
             dist/Image.gz
+            dist/Image.kpm.gz
           overwrite: true
           fail_on_unmatched_files: true
           body: |
             BakaSU + SUSFS v2.3.0 + NoMount for Samsung Galaxy A22 5G (SM-A226B).
+            Two kernel variants are attached:
+            - standard: no KPM runtime
+            - KPM: Image pre-patched with KPatch-Next kpimg; install
+              KPatch-Next-Module for the userspace manager, then load .kpm files.
             Exact BakaSU / SUSFS / NoMount versions are recorded in `build-info.txt`
-            inside the AnyKernel3 zip.
+            inside each AnyKernel3 zip.
           generate_release_notes: false

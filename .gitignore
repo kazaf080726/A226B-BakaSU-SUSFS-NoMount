@@ -4,15 +4,9 @@
 /out/
 /out-*/
 /dist/
+/.kpm-tools/
 /include/generated/
 /arch/arm64/include/generated/
 /arch/arm/include/generated/
-/scripts/basic/fixdep
-/scripts/basic/bin2c
-/scripts/unifdef
-/scripts/.unifdef.cmd
-/scripts/basic/.*.cmd
-/scripts/kconfig/conf
-/scripts/mod/modpost
 *.rej
 *.orig

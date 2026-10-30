@@ -9,7 +9,8 @@ BakaSU + SUSFS + NoMount kernel for Samsung Galaxy A22 5G (SM-A226B)
 --------------
 - Releases（推荐）：https://github.com/kazaf080726/A226B-BakaSU-SUSFS-NoMount/releases
 - 最新 CI 构建：仓库 Actions -> Build SM-A226B kernel -> 最近一次 run 的 Artifacts
-- v1.0.0 构建信息：BakaSU `d5e9e02`、SUSFS `v2.3.0`、NoMount `bf1847f`（见 zip 内 build-info.txt）
+- v1.0.1：BakaSU `d5e9e02`、SUSFS `v2.3.0`、NoMount `bf1847f`
+- v1.1.0 起同时提供 **标准版** 与 **KPM 版** 两种 zip，见下文第五节
 
 二、集成了什么
 --------------
@@ -40,6 +41,14 @@ BakaSU + SUSFS + NoMount kernel for Samsung Galaxy A22 5G (SM-A226B)
    - 内核原生集成（CONFIG_NOMOUNT=y），不使用 LKM
    - 用户态请安装 NoMount 官方 Metamodule（WebUI 管理）
 
+5. KPM 支持（可选变体，KPatch-Next）
+   - 用 kptools 把 KPatch-Next 的 kpimg 追加进 Image，内核启动时接管并
+     提供 KPM（Kernel Patch Module）运行时；不改内核源码、不占用 LKM
+   - 这是 KPatch-Next 的 KPM，不是 `CONFIG_KPM=y` 的内置 KPM；两者互斥
+   - 刷 KPM 版内核后，再安装 KPatch-Next-Module（Release 里附带），
+     用它的 WebUI 加载 `.kpm`
+   - 固定使用 KPatch-Next `0.13.5-2` 的 kpimg/kptools
+
 三、没有移植 / 已知限制
 -----------------------
 - priority UID filter（getpriority 滥用检测对抗）：上游 2026-10 才加入，
@@ -48,14 +57,16 @@ BakaSU + SUSFS + NoMount kernel for Samsung Galaxy A22 5G (SM-A226B)
   SELinux 内部结构差异过大，只保留了 avc 日志脱敏与 KSU 自身的 domain 处理。
 - 由于以上两项缺失，SUSFS 的“全部功能”并非 100%，但路径/挂载/stat/maps/
   uname/cmdline/open_redirect/avc 日志等主力隐藏功能全部生效。
-- 本内核未在本机实机验证（只完成编译与符号校验）。首次刷入前请务必备份
-  原厂 boot.img，并确认已解锁 BootLoader。
+- 本内核已在 SM-A226B 实机验证：可正常开机，SUSFS 正常运作，NoMount
+  可正常打开并生效（短期验证；长期稳定性仍以实测为准）。首次刷入前请
+  务必备份原厂 boot.img，并确认已解锁 BootLoader。
 
 四、构建
 --------
 GitHub Actions（推荐）：
   Actions -> Build SM-A226B kernel -> Run workflow
-  产物：AnyKernel3 zip、Image.gz、modules.zip
+  产物：标准版 AnyKernel3 zip、KPM 版 AnyKernel3 zip、Image.gz / Image.kpm.gz、
+        modules.zip、KPatch-Next-Module.zip
 
 本地（Ubuntu 22.04+ / WSL2）：
   bash ci/fetch_toolchain.sh
@@ -63,20 +74,29 @@ GitHub Actions（推荐）：
   git clone https://github.com/maxsteeel/nomount.git NoMount
   bash ci/build.sh
   bash ci/package.sh
+  bash ci/kpm_patch.sh      # 生成 Image.kpm / Image.kpm.gz
+  bash ci/package_kpm.sh    # 生成 KPM 版 AnyKernel3 zip
 
 工具链：AOSP clang-r383902 + GCC 4.9 binutils（Samsung 原厂同款）。
+KPM：KPatch-Next 0.13.5-2 的 kptools/kpimg（脚本内固定版本）。
 
 五、刷入
 --------
 1. 解锁 BootLoader（会清空数据并熔断 KNOX，不可逆）。
-2. 使用 TWRP（a22x 的第三方 recovery）刷入
-   A226B-BakaSU-SUSFS-NoMount-*.zip。
+2. 在 TWRP 中二选一：
+   - 普通使用：刷 A226B-BakaSU-SUSFS-NoMount-*.zip（标准版）
+   - 需要 KPM：刷 A226B-BakaSU-SUSFS-NoMount-KPM-*.zip
 3. 重启；首次开机较慢。
 4. 安装 BakaSU 管理器 APK；再安装 NoMount 官方 Metamodule（可选）。
-5. 若无法开机：进 TWRP 恢复备份的 stock boot.img，或 Odin 刷回原厂 AP。
+5. KPM 版还需要安装 Release 里的 KPatch-Next-Module-v0.0.1.zip，
+   之后在它的 WebUI 里加载 `.kpm`；不要再用它的“patch boot”功能。
+6. 若无法开机：进 TWRP 恢复备份的 stock boot.img，或 Odin 刷回原厂 AP；
+   KPM 版无法开机时先刷回标准版排除 KPM 因素。
 
 注意：
 - 本 zip 只替换 boot 分区中的 kernel，保留原厂 ramdisk/dtb。
+- 标准版与 KPM 版是同一个内核源码，仅 Image 是否追加 kpimg 不同；
+  两者不要混刷模块，KPM 版必须搭配 KPatch-Next-Module。
 - 三星 AVB/vbmeta 可能导致校验失败；AK3 已带 PATCH_VBMETA_FLAG=auto，
   如仍无法开机请同时刷入 vbmeta_disabled（或使用已禁用校验的 TWRP）。
 - KNOX 相关功能（Samsung Pay、Secure Folder 等）会永久失效。
