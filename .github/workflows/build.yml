@@ -43,9 +43,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev \
-            lz4 device-tree-compiler python3 zip unzip cpio rsync curl git libtinfo5 || \
+            lz4 device-tree-compiler python3 zip unzip cpio rsync curl git zlib1g-dev libtinfo5 || \
           sudo apt-get install -y build-essential bc bison flex libssl-dev libelf-dev \
-            lz4 device-tree-compiler python3 zip unzip cpio rsync curl git
+            lz4 device-tree-compiler python3 zip unzip cpio rsync curl git zlib1g-dev
 
       - name: Cache toolchain
         uses: actions/cache@v4
