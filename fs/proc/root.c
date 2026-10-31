@@ -184,7 +184,17 @@ void __init proc_root_init(void)
 #ifdef CONFIG_SYSVIPC
 	proc_mkdir("sysvipc", NULL);
 #endif
-	proc_mkdir("fs", NULL);
+	/*
+	 * Android detectors (e.g. Chunqiu) read /proc/fs/jbd2 and
+	 * /proc/fs/ext4 to flag loop-mounted ext4 images as KernelSU.
+	 * /proc/fs is a debugging view; keep it root-only so untrusted
+	 * apps cannot enumerate it.
+	 */
+	{
+		struct proc_dir_entry *pde = proc_mkdir("fs", NULL);
+		if (pde)
+			pde->mode = S_IFDIR | S_IRUSR | S_IXUSR;
+	}
 	proc_mkdir("driver", NULL);
 	proc_create_mount_point("fs/nfsd"); /* somewhere for the nfsd filesystem to be mounted */
 #if defined(CONFIG_SUN_OPENPROMFS) || defined(CONFIG_SUN_OPENPROMFS_MODULE)
