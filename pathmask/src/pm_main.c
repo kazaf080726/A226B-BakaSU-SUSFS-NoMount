@@ -889,20 +889,30 @@ static bool sys_path_matches_target(const char *p)
  */
 static bool sys_path_match_user_filename(struct pt_regs *regs)
 {
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
+	/* 4.14 arm64 SyS_* wrappers take real args, not a pt_regs pointer. */
+	const char __user *fname = (const char __user *)regs->regs[1];
+#else
 	struct pt_regs *user_regs = (struct pt_regs *)regs->regs[0];
+	const char __user *fname;
+#endif
 	char buf[TARGET_TEXT_LEN];
 	long len;
 
-	if (!user_regs || !should_hide_for_current())
+	if (!should_hide_for_current())
 		return false;
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
+	if (!user_regs)
+		return false;
+	fname = (const char __user *)user_regs->regs[1];
+#endif
 
 	/*
 	 * All hooked syscalls share the same prefix:
 	 *   sys_xxxat(int dfd, const char __user *filename, ...)
 	 * so the user filename pointer always lands in user_regs->regs[1].
 	 */
-	len = strncpy_from_user(buf, (const char __user *)user_regs->regs[1],
-				sizeof(buf));
+	len = strncpy_from_user(buf, fname, sizeof(buf));
 	if (len <= 0)
 		return false;
 	buf[sizeof(buf) - 1] = '\0';
@@ -1409,7 +1419,6 @@ struct getdents_cb_data {
 static int getdents_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 {
 	struct getdents_cb_data *d = (struct getdents_cb_data *)ri->data;
-	struct pt_regs *user_regs = (struct pt_regs *)regs->regs[0];
 	unsigned int count;
 
 	d->dirent = NULL;
@@ -1417,11 +1426,21 @@ static int getdents_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	d->kbuf_len = 0;
 	d->scoped = should_hide_for_current();
 
-	if (!d->scoped || !user_regs)
+	if (!d->scoped)
 		return 0;
 
-	count = (unsigned int)user_regs->regs[2];
-	d->dirent = (struct linux_dirent64 __user *)user_regs->regs[1];
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
+	count = (unsigned int)regs->regs[2];
+	d->dirent = (struct linux_dirent64 __user *)regs->regs[1];
+#else
+	{
+		struct pt_regs *user_regs = (struct pt_regs *)regs->regs[0];
+		if (!user_regs)
+			return 0;
+		count = (unsigned int)user_regs->regs[2];
+		d->dirent = (struct linux_dirent64 __user *)user_regs->regs[1];
+	}
+#endif
 
 	count = min(count, GETDENTS_BUF_LIMIT);
 	if (!count)
