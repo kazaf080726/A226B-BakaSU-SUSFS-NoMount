@@ -1427,7 +1427,13 @@ static int getdents_entry(struct kretprobe_instance *ri, struct pt_regs *regs)
 	if (!count)
 		return 0;
 
-	d->kbuf = kmalloc(count, GFP_KERNEL);
+	/*
+ * kretprobe handlers run with preemption disabled: GFP_KERNEL may sleep
+ * and triggers "BUG: scheduling while atomic" (Samsung SEC_DEBUG then
+ * panics/reboots). Use GFP_ATOMIC and keep the buffer modest.
+ */
+	count = min(count, 16384u);
+	d->kbuf = kmalloc(count, GFP_ATOMIC);
 	if (d->kbuf)
 		d->kbuf_len = count;
 	return 0;
