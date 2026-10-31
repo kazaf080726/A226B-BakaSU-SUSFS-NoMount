@@ -197,6 +197,29 @@ out:
 	return error;
 }
 
+
+#ifdef CONFIG_KSU
+/*
+ * Hide Android app UIDs from getpriority()/setpriority() and
+ * ioprio_get()/ioprio_set() UID enumeration. Detectors such as Chunqiu
+ * Native Check walk the app UID range with getpriority(PRIO_USER, uid)
+ * to discover hidden packages; an app caller must not be able to see
+ * another app UID this way.
+ */
+static inline bool ksu_hide_app_uid(uid_t uid)
+{
+	uid_t caller = current_uid().val % 100000;
+	uid_t target = uid % 100000;
+
+	if (caller < 10000 || caller > 99999)
+		return false;
+	if (caller == target)
+		return false;
+	return (target >= 10000 && target <= 19999) ||
+	       (target >= 90000 && target <= 99999);
+}
+#endif
+
 SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
 {
 	struct task_struct *g, *p;
@@ -208,6 +231,11 @@ SYSCALL_DEFINE3(setpriority, int, which, int, who, int, niceval)
 
 	if (which > PRIO_USER || which < PRIO_PROCESS)
 		goto out;
+
+#ifdef CONFIG_KSU
+	if (which == PRIO_USER && who && ksu_hide_app_uid((uid_t)who))
+		return -ESRCH;
+#endif
 
 	/* normalize: avoid signed division (rounding problems) */
 	error = -ESRCH;
@@ -278,6 +306,11 @@ SYSCALL_DEFINE2(getpriority, int, which, int, who)
 
 	if (which > PRIO_USER || which < PRIO_PROCESS)
 		return -EINVAL;
+
+#ifdef CONFIG_KSU
+	if (which == PRIO_USER && who && ksu_hide_app_uid((uid_t)who))
+		return -ESRCH;
+#endif
 
 	rcu_read_lock();
 	read_lock(&tasklist_lock);

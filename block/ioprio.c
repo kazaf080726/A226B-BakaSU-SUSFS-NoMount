@@ -61,6 +61,29 @@ int set_task_ioprio(struct task_struct *task, int ioprio)
 }
 EXPORT_SYMBOL_GPL(set_task_ioprio);
 
+
+#ifdef CONFIG_KSU
+/*
+ * Hide Android app UIDs from getpriority()/setpriority() and
+ * ioprio_get()/ioprio_set() UID enumeration. Detectors such as Chunqiu
+ * Native Check walk the app UID range with getpriority(PRIO_USER, uid)
+ * to discover hidden packages; an app caller must not be able to see
+ * another app UID this way.
+ */
+static inline bool ksu_hide_app_uid(uid_t uid)
+{
+	uid_t caller = current_uid().val % 100000;
+	uid_t target = uid % 100000;
+
+	if (caller < 10000 || caller > 99999)
+		return false;
+	if (caller == target)
+		return false;
+	return (target >= 10000 && target <= 19999) ||
+	       (target >= 90000 && target <= 99999);
+}
+#endif
+
 SYSCALL_DEFINE3(ioprio_set, int, which, int, who, int, ioprio)
 {
 	int class = IOPRIO_PRIO_CLASS(ioprio);
@@ -93,6 +116,10 @@ SYSCALL_DEFINE3(ioprio_set, int, which, int, who, int, ioprio)
 	}
 
 	ret = -ESRCH;
+#ifdef CONFIG_KSU
+	if (which == IOPRIO_WHO_USER && who && ksu_hide_app_uid((uid_t)who))
+		return -ESRCH;
+#endif
 	rcu_read_lock();
 	switch (which) {
 		case IOPRIO_WHO_PROCESS:
