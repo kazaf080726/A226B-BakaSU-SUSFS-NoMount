@@ -5,6 +5,10 @@ BakaSU + SUSFS + NoMount kernel for Samsung Galaxy A22 5G (SM-A226B)
 内核：Linux 4.14.186（Samsung 官方开源包 SM-A226B_13_Opensource）
 类型：Non-GKI（arm64）
 
+> **免费 · 公开 · 持续维护**
+> 本项目所有源码与构建产物永久免费公开，可自行编译；不卖包、不设付费墙、不需要授权码。
+> 维护策略与自编译方法见第七节，第三方代码许可见 [NOTICE.md](NOTICE.md)。
+
 一、下载与版本
 --------------
 - Releases（推荐）：https://github.com/kazaf080726/A226B-BakaSU-SUSFS-NoMount/releases
@@ -123,7 +127,20 @@ KPM：KPatch-Next 0.13.5-2 的 kptools/kpimg（脚本内固定版本）。
 - pathmask/       PathMask 4.14 移植源码 + KSU 模块外壳
 - patches/        本仓库相对原厂源码的集成改动说明（见 patches/README.md）
 
-七、致谢
+七、维护、免费与自编译
+----------------------
+- **永久免费公开**：源码、CI 配置、Release 产物全部公开，不提供付费版、付费服务，
+  也不要求任何授权码；欢迎 fork、自编译、二次分发。
+- **持续维护**：BakaSU / NoMount 每次构建跟随上游最新 main/master；SUSFS 在上游
+  更新后做 4.14 移植；PathMask 跟随上游 2.8.x；兼容性与安全问题通过 Issue 修复。
+- **自行编译**：Fork 本仓库 → Actions → Build SM-A226B kernel → Run workflow；
+  或按第四节在本地编译。产物在 Actions Artifacts，打 `v*` tag 会自动发 Release。
+- **二次分发**：允许，但必须遵守 GPL-2.0 / GPL-3.0（见 [NOTICE.md](NOTICE.md)），
+  保留来源与作者，不得把本项目包装成付费独家版本。
+- **维护边界**：不承诺所有地区/固件版本都能开机；刷机风险自负；即使停止维护，
+  全部源码与历史 Release 也会保留在仓库中。
+
+八、致谢
 --------
 - BakaSU: https://github.com/Baka-SU/BakaSU
 - SUSFS: simonpunk https://gitlab.com/simonpunk/susfs4ksu
