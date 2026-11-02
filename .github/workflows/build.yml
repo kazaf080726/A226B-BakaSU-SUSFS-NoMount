@@ -28,6 +28,13 @@ jobs:
     timeout-minutes: 240
     env:
       KPATCH_TAG: 0.13.5-2
+      # Pinned upstream refs. BakaSU/NoMount are cloned from upstream at build
+      # time; keeping the refs here (instead of "latest main") is what makes a
+      # rebuild of the same kernel commit produce the same artifacts.
+      # Override per run with the workflow_dispatch inputs below.
+      BAKASU_REF: 516d3e87fbc986ccefdde2c2765f1700612441a9
+      NOMOUNT_REF: bf1847f98fed382369c43bfd652cd93774b9b8e3
+      REPRO: "1"
     steps:
       - name: Checkout kernel source
         uses: actions/checkout@v4
@@ -61,14 +68,14 @@ jobs:
         run: |
           git clone https://github.com/Baka-SU/BakaSU.git KernelSU
           cd KernelSU
-          git checkout "${{ github.event.inputs.bakasu_ref || 'main' }}"
+          git checkout "${{ github.event.inputs.bakasu_ref || env.BAKASU_REF }}"
           git log -1 --format='BakaSU %H %ci %s'
 
       - name: Clone NoMount
         run: |
           git clone https://github.com/maxsteeel/nomount.git NoMount
           cd NoMount
-          git checkout "${{ github.event.inputs.nomount_ref || 'master' }}"
+          git checkout "${{ github.event.inputs.nomount_ref || env.NOMOUNT_REF }}"
           git log -1 --format='NoMount %H %ci %s'
 
       - name: Build kernel
@@ -85,6 +92,9 @@ jobs:
 
       - name: Package KPM variant
         run: bash ci/package_kpm.sh
+
+      - name: Verify artifacts
+        run: bash ci/verify.sh
 
       - name: Fetch KPatch-Next module
         run: |
@@ -110,22 +120,41 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: Build release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          {
+            echo "BakaSU + SUSFS + NoMount for Samsung Galaxy A22 5G (SM-A226B), Linux 4.14.186."
+            echo
+            echo "| component | revision |"
+            echo "|---|---|"
+            echo "| kernel | \`4.14.186\` (Samsung SM-A226B open source) |"
+            echo "| BakaSU | \`$(git -C KernelSU rev-parse HEAD)\` |"
+            echo "| SUSFS | \`$(grep -m1 '^#define SUSFS_VERSION' include/linux/susfs.h | cut -d'\"' -f2)\` |"
+            echo "| NoMount | \`$(git -C NoMount rev-parse HEAD)\` |"
+            echo "| KPatch-Next (KPM build) | \`${KPATCH_TAG}\` |"
+            echo
+            echo "Two kernel variants are attached:"
+            echo "- **standard**: no KPM runtime"
+            echo "- **KPM**: Image pre-patched with KPatch-Next kpimg; install KPatch-Next-Module for the userspace manager, then load .kpm files."
+            echo
+            echo "Flash the \`.zip\` in TWRP/recovery (AnyKernel3, boot partition only). \`Image.gz\` / \`Image.kpm.gz\` are for manual repacking."
+            echo "The exact dependency revisions above are also recorded in \`build-info.txt\` inside each zip."
+            echo
+            echo "Builds are reproducible: same commit + same pinned revisions + same toolchain produces a byte-identical \`Image\`."
+          } > dist/release-body.md
+          cat dist/release-body.md
+
       - name: Create release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/*.zip
+            dist/*.ko
             dist/Image.gz
             dist/Image.kpm.gz
           overwrite: true
           fail_on_unmatched_files: true
-          body: |
-            BakaSU + SUSFS v2.3.0 + NoMount for Samsung Galaxy A22 5G (SM-A226B).
-            Two kernel variants are attached:
-            - standard: no KPM runtime
-            - KPM: Image pre-patched with KPatch-Next kpimg; install
-              KPatch-Next-Module for the userspace manager, then load .kpm files.
-            Exact BakaSU / SUSFS / NoMount versions are recorded in `build-info.txt`
-            inside each AnyKernel3 zip.
+          body_path: dist/release-body.md
           generate_release_notes: false

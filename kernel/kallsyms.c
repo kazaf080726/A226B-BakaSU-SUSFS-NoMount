@@ -673,7 +673,21 @@ static int s_show(struct seq_file *m, void *p)
 			susfs_starts_with(iter->name, "handle_sepolicy") ||
 			susfs_starts_with(iter->name, "getenforce") ||
 			susfs_starts_with(iter->name, "setenforce") ||
-			susfs_starts_with(iter->name, "is_zygote"))
+			susfs_starts_with(iter->name, "is_zygote") ||
+			/*
+			 * Not every KernelSU symbol carries a ksu_/susfs_ prefix. Without
+			 * the substring tests below, /proc/kallsyms still exposed
+			 * setup_ksu_cred, setup_ksu_cred_session_keyring,
+			 * setup_ksu_cred_selinux, is_task_ksu_domain, anon_ksu_ioctl,
+			 * anon_ksu_release, anon_ksu_fops, do_ksu_load_allow_list and
+			 * check_nnp_nosuid.ksu_sid on a running device, which is enough
+			 * for a detector to grep "ksu".
+			 */
+			susfs_contains(iter->name, "_ksu_") ||
+			susfs_contains(iter->name, ".ksu_") ||
+			susfs_contains(iter->name, "susfs") ||
+			susfs_contains(iter->name, "kernelsu") ||
+			susfs_contains(iter->name, "ksud"))
 		{
 			return 0;
 		}

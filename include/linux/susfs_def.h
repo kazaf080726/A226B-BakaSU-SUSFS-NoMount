@@ -114,6 +114,20 @@ static inline bool susfs_ends_with(const char *str, const char *suffix) {
 	return !strcmp(str + str_len - suffix_len, suffix);
 }
 
+/*
+ * Substring test. The symbol-name filter in kernel/kallsyms.c needs this
+ * because a number of KernelSU symbols do not carry a ksu_ prefix: the driver
+ * leaks names such as setup_ksu_cred, is_task_ksu_domain, anon_ksu_ioctl,
+ * do_ksu_load_allow_list and check_nnp_nosuid.ksu_sid. Matching on prefixes
+ * alone leaves them visible to any app that greps /proc/kallsyms.
+ */
+static inline bool susfs_contains(const char *str, const char *needle) {
+	if (!str || !needle)
+		return false;
+
+	return strstr(str, needle) != NULL;
+}
+
 /* From KernelSU */
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0)
 typedef const struct qstr *susfs_fname_t;

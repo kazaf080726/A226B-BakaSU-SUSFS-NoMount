@@ -48,6 +48,9 @@
 #include <linux/mutex.h>
 #include <linux/rculist.h>
 #include <linux/uaccess.h>
+#ifdef CONFIG_KSU
+#include <linux/cred.h>		/* current_uid() for ksu_hide_lkm_name() */
+#endif
 #include <asm/cacheflush.h>
 #include <linux/set_memory.h>
 #include <asm/mmu_context.h>
@@ -4235,6 +4238,32 @@ static void m_stop(struct seq_file *m, void *p)
 	mutex_unlock(&module_mutex);
 }
 
+#ifdef CONFIG_KSU
+/*
+ * PathMask and procguard are LKMs by design, so they show up in /proc/modules
+ * and any detector can simply grep for the names. Hide them from app/isolated
+ * UIDs; root and system UIDs still get the real list, and the modules
+ * themselves are unaffected.
+ */
+static bool ksu_hide_lkm_name(const char *name)
+{
+	static const char *const hidden[] = { "pathmask", "procguard", NULL };
+	uid_t app_id;
+	int i;
+
+	app_id = current_uid().val % 100000;
+	if (app_id < 10000)
+		return false;
+
+	for (i = 0; hidden[i]; i++) {
+		if (!strcmp(name, hidden[i]))
+			return true;
+	}
+
+	return false;
+}
+#endif
+
 static int m_show(struct seq_file *m, void *p)
 {
 	struct module *mod = list_entry(p, struct module, list);
@@ -4243,6 +4272,11 @@ static int m_show(struct seq_file *m, void *p)
 	/* We always ignore unformed modules. */
 	if (mod->state == MODULE_STATE_UNFORMED)
 		return 0;
+
+#ifdef CONFIG_KSU
+	if (ksu_hide_lkm_name(mod->name))
+		return 0;
+#endif
 
 	seq_printf(m, "%s %u",
 		   mod->name, mod->init_layout.size + mod->core_layout.size);

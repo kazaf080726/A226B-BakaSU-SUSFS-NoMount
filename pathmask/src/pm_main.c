@@ -74,19 +74,19 @@ enum pathmask_scope_mode {
 };
 
 static char *target_path = "/data/local/tmp/pathmask";
-module_param(target_path, charp, 0644);
+module_param(target_path, charp, 0400);
 MODULE_PARM_DESC(target_path, "Legacy single absolute path to hide");
 
 static char target_paths[TARGET_PATHS_LEN];
-module_param_string(target_paths, target_paths, sizeof(target_paths), 0644);
+module_param_string(target_paths, target_paths, sizeof(target_paths), 0400);
 MODULE_PARM_DESC(target_paths, "Comma-separated absolute paths to hide");
 
 static bool hide_dirents = true;
-module_param(hide_dirents, bool, 0644);
+module_param(hide_dirents, bool, 0400);
 MODULE_PARM_DESC(hide_dirents, "Hide target from getdents64 directory listings");
 
 static bool hide_isolated = true;
-module_param(hide_isolated, bool, 0644);
+module_param(hide_isolated, bool, 0400);
 MODULE_PARM_DESC(hide_isolated, "Also hide from Android isolated-process UIDs (90000-98999 App Zygote, 99000-99999 plain isolated) in deny scope");
 
 /*
@@ -135,19 +135,19 @@ MODULE_PARM_DESC(hide_isolated, "Also hide from Android isolated-process UIDs (9
  * friendly hot path.
  */
 static bool enable_syscall_hooks;
-module_param(enable_syscall_hooks, bool, 0644);
+module_param(enable_syscall_hooks, bool, 0400);
 MODULE_PARM_DESC(enable_syscall_hooks,
 	"Legacy boolean: 1 = enable all 7 __arm64_sys_* fallback hooks, 0 = none. Only consulted when `syscall_hooks` is empty. Modern callers should use `syscall_hooks=` to pick a subset.");
 
 #define PM_SYSCALL_HOOKS_LEN 256
 static char syscall_hooks[PM_SYSCALL_HOOKS_LEN] =
 	"newfstatat,statx,faccessat2,readlinkat,openat,openat2";
-module_param_string(syscall_hooks, syscall_hooks, sizeof(syscall_hooks), 0644);
+module_param_string(syscall_hooks, syscall_hooks, sizeof(syscall_hooks), 0400);
 MODULE_PARM_DESC(syscall_hooks,
 	"Comma-separated subset of __arm64_sys_* fallback probes to register. Tokens: newfstatat,statx,faccessat,faccessat2,readlinkat,openat,openat2 (or 'all' / 'none'). Default omits faccessat because it is the only probe Holmes Abnormal Environment 04 fingerprints via access(F_OK) timing. Empty string falls back to enable_syscall_hooks.");
 
 static char scope_mode[16] = "global";
-module_param_string(scope_mode, scope_mode, sizeof(scope_mode), 0644);
+module_param_string(scope_mode, scope_mode, sizeof(scope_mode), 0400);
 MODULE_PARM_DESC(scope_mode, "Hide scope: global, deny, or allow");
 
 enum pathmask_write_op_policy {
@@ -157,14 +157,14 @@ enum pathmask_write_op_policy {
 };
 
 static char write_op_policy[16] = "passthrough";
-module_param_string(write_op_policy, write_op_policy, sizeof(write_op_policy), 0644);
+module_param_string(write_op_policy, write_op_policy, sizeof(write_op_policy), 0400);
 MODULE_PARM_DESC(write_op_policy,
 	"write-class syscall policy on hidden targets: passthrough (default, native fs semantics), eacces (syscall-level absent-emulation incl. open(O_CREAT)), enoent (legacy blanket ENOENT)");
 
 static enum pathmask_write_op_policy active_write_policy = WRITE_OP_PASSTHROUGH;
 
 static char deny_uids[UID_LIST_LEN];
-module_param_string(deny_uids, deny_uids, sizeof(deny_uids), 0644);
+module_param_string(deny_uids, deny_uids, sizeof(deny_uids), 0400);
 MODULE_PARM_DESC(deny_uids, "Comma-separated scope UIDs: hidden in deny mode, exempt in allow mode");
 
 struct hidden_target {
@@ -203,7 +203,7 @@ static unsigned int target_count;
  * and falsely reported as "missing"). target_count itself is the source
  * of truth -- module_param_named() simply mirrors it.
  */
-module_param_named(resolved_count, target_count, uint, 0444);
+module_param_named(resolved_count, target_count, uint, 0400);
 MODULE_PARM_DESC(resolved_count,
 		 "Number of target paths successfully resolved at load time");
 

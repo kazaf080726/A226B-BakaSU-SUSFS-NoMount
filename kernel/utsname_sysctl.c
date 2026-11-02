@@ -15,6 +15,35 @@
 #include <linux/sysctl.h>
 #include <linux/wait.h>
 #include <linux/rwsem.h>
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+#include <linux/jump_label.h>
+#include <linux/string.h>
+#include <linux/susfs.h>
+
+extern struct static_key_false susfs_is_uname_spoof_buffer_set;
+
+/*
+ * SUSFS spoofs the uname(2) syscall, but /proc/sys/kernel/osrelease and
+ * /proc/sys/kernel/version read the real uts_namespace. An app could therefore
+ * read "4.14.186+" there while uname(2) reported the spoofed string, which
+ * proves the kernel lied. Mirror the same spoofed values on the read path.
+ */
+static void susfs_spoof_uts_sysctl(struct ctl_table *table, char *buf,
+				   size_t len)
+{
+	struct new_utsname uts;
+
+	if (table->data == (void *)init_uts_ns.name.release) {
+		uts = *utsname();
+		susfs_spoof_uname(&uts);
+		strscpy(buf, uts.release, len);
+	} else if (table->data == (void *)init_uts_ns.name.version) {
+		uts = *utsname();
+		susfs_spoof_uname(&uts);
+		strscpy(buf, uts.version, len);
+	}
+}
+#endif
 
 #ifdef CONFIG_PROC_SYSCTL
 
@@ -52,6 +81,10 @@ static int proc_do_uts_string(struct ctl_table *table, int write,
 	down_read(&uts_sem);
 	memcpy(tmp_data, get_uts(table), sizeof(tmp_data));
 	up_read(&uts_sem);
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+	if (!write && static_branch_unlikely(&susfs_is_uname_spoof_buffer_set))
+		susfs_spoof_uts_sysctl(table, tmp_data, sizeof(tmp_data));
+#endif
 	r = proc_dostring(&uts_table, write, buffer, lenp, ppos);
 
 	if (write) {

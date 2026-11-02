@@ -18,3 +18,14 @@
 /arch/arm/include/generated/
 *.rej
 *.orig
+
+# kbuild host tools and command records regenerated on every build: committing
+# them both pollutes the tree and (because the build rewrites them) makes git
+# report a dirty tree, which appends a "+" to the kernel release string.
+/scripts/basic/fixdep
+/scripts/basic/bin2c
+/scripts/unifdef
+/scripts/.*.cmd
+/scripts/basic/.*.cmd
+/.tmp_versions/
+/pathmask/src/.tmp_versions/

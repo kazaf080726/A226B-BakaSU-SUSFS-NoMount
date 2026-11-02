@@ -26,6 +26,8 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/proc_fs.h>
+#include <linux/uidgid.h>
+#include <linux/user_namespace.h>
 #include <linux/seq_file.h>
 #include <linux/init.h>
 #include <linux/uaccess.h>
@@ -74,10 +76,22 @@ static int __init ikconfig_init(void)
 	struct proc_dir_entry *entry;
 
 	/* create the current config file */
-	entry = proc_create("config.gz", S_IFREG | S_IRUGO, NULL,
+	/*
+	 * Readable by root and by the "system" group (Android AID_SYSTEM, 1000)
+	 * only: the embedded .config spells out CONFIG_KSU=y,
+	 * CONFIG_KSU_SUSFS_* and CONFIG_NOMOUNT=y, so apps must not read it.
+	 *
+	 * It must NOT be root-only: system_server's libvintf parses this file to
+	 * verify the kernel requirements against the framework compatibility
+	 * matrix. Denying it there made VintfObject.verifyWithoutAvb() fail
+	 * ("No compatible kernel requirement found") and the framework showed a
+	 * "device internal problem" dialog on every boot.
+	 */
+	entry = proc_create("config.gz", S_IFREG | S_IRUSR | S_IRGRP, NULL,
 			    &ikconfig_file_ops);
 	if (!entry)
 		return -ENOMEM;
+	proc_set_user(entry, GLOBAL_ROOT_UID, make_kgid(&init_user_ns, 1000));
 
 	proc_set_size(entry, kernel_config_data_size);
 

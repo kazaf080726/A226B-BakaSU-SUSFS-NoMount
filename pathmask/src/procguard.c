@@ -81,12 +81,12 @@
 #define ANDROID_ISOLATED_END 99999u
 
 static unsigned int target_gid = 3009;
-module_param(target_gid, uint, 0644);
+module_param(target_gid, uint, 0400);
 MODULE_PARM_DESC(target_gid,
 	"GID whose membership is neutralized for isolated UIDs (default 3009 = AID_READPROC)");
 
 static bool block_isolated = true;
-module_param(block_isolated, bool, 0644);
+module_param(block_isolated, bool, 0400);
 MODULE_PARM_DESC(block_isolated,
 	"1 = neutralize target_gid for isolated UIDs (hot-toggleable without rmmod)");
 
@@ -104,7 +104,7 @@ static int pg_hits_get(char *buf, const struct kernel_param *kp)
 static const struct kernel_param_ops pg_hits_ops = {
 	.get = pg_hits_get,
 };
-module_param_cb(blocked_hits, &pg_hits_ops, NULL, 0444);
+module_param_cb(blocked_hits, &pg_hits_ops, NULL, 0400);
 MODULE_PARM_DESC(blocked_hits, "Number of in_group_p() results overridden so far");
 
 static int pg_missed_get(char *buf, const struct kernel_param *kp)
@@ -115,7 +115,7 @@ static int pg_missed_get(char *buf, const struct kernel_param *kp)
 static const struct kernel_param_ops pg_missed_ops = {
 	.get = pg_missed_get,
 };
-module_param_cb(missed, &pg_missed_ops, NULL, 0444);
+module_param_cb(missed, &pg_missed_ops, NULL, 0400);
 MODULE_PARM_DESC(missed, "kretprobe instances dropped due to maxactive exhaustion");
 
 struct pg_probe_data {
