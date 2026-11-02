@@ -73,8 +73,14 @@ fi
 
 echo "=== [$DEFCONFIG] BakaSU: $(git -C KernelSU rev-parse --short=12 HEAD 2>/dev/null || echo '?')"
 echo "=== [$DEFCONFIG] NoMount: $(git -C NoMount rev-parse --short=12 HEAD 2>/dev/null || echo '?')"
+# Reproducibility: the linker otherwise stamps a build-id note whose value is
+# not stable between links (GNU ld treats a bare --build-id as a generated id).
+# With everything else pinned, that note was the only remaining difference
+# between a local and a CI build: 39 bytes across the vmlinux and vDSO notes out
+# of 29,894,672. The vDSO side is handled in arch/arm64/kernel/vdso/Makefile;
+# this clears it for the vmlinux and module links.
 make -C "$ROOT" O="$OUT" ARCH=arm64 "$DEFCONFIG"
 make -C "$ROOT" O="$OUT" ARCH=arm64 -j"$JOBS" \
-    KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y
+    KCFLAGS=-w CONFIG_SECTION_MISMATCH_WARN_ONLY=y LDFLAGS_BUILD_ID=
 
 ls -lh "$OUT/arch/arm64/boot/Image" "$OUT/arch/arm64/boot/Image.gz"

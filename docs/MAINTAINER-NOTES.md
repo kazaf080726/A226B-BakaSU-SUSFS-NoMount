@@ -95,6 +95,24 @@ VintfObject: For kernel requirements at matrix level 5, Missing config CONFIG_AD
 9p 文件系统上任何 `git status/diff` 都会对 7 万多个文件重新哈希，几分钟起步。
 改动用"复制文件"同步，不要用 `git diff` 生成补丁（PowerShell 的 `>` 还会写成 UTF-16）。
 
+### 3.8 链接器 build-id：会让 Image 差 39 字节
+
+所有输入钉死之后，本地与 CI 的 `Image` 仍会差 **39 字节**，集中在 vDSO 和内核各自的
+`.note.gnu.build-id`。裸 `--build-id` 由链接器生成、值不稳定。
+修法：`arch/arm64/kernel/vdso/Makefile` 改 `--build-id=none`，并在 `ci/build.sh` 里用
+`LDFLAGS_BUILD_ID=` 覆盖 vmlinux/模块那两处。**除这 39 字节外内容本来就完全一致**，
+所以只要看到"差的字节只有几十个且都在 `GNU\0` 之后"，就是这个原因。
+
+### 3.9 模块的绝对路径：`.ko` 差 ~1.3 KiB
+
+`make M=<绝对路径> modules` 会把绝对路径写进 `__FILE__` 与 DWARF 字符串
+（CI 是 `/home/runner/work/...`，本地是 `/home/kali/...`），导致 `.rodata.str1.1`
+和 `.debug_*` 尺寸不同。修法：`pathmask/build.sh` 里 `KCFLAGS="-ffile-prefix-map=$ROOT/="`。
+**`ccflags-y` 里加无效**——覆盖不到生成的 `.mod.c`。
+
+> `Image.gz` 的压缩字节还依赖宿主机 gzip 版本（CI 22.04 vs 本地 26.04 不同），
+> 所以"产物一致"应以**解压后的 `Image`** 为准。
+
 ## 4. 改动的边界
 
 **已确认未被触碰**（相对原厂集成，`git diff` 为空）：

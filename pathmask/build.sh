@@ -16,7 +16,13 @@ export CLANG_TRIPLE="aarch64-linux-gnu-"
 unset CC LD AR NM STRIP OBJCOPY OBJDUMP READELF HOSTCC HOSTCXX || true
 
 echo "[+] building PathMask LKMs against $OUT"
-make -C "$ROOT" O="$OUT" M="$ROOT/pathmask/src" modules
+# Reproducibility: modules are built with an absolute M= path, so __FILE__ and
+# the DWARF strings used to embed /home/runner/work/... on CI and
+# /home/kali/... locally -- by itself that made the two .ko differ by ~1.3 KiB.
+# KCFLAGS reaches every compilation unit (including the generated .mod.c),
+# whereas ccflags-y did not; the map is applied to the kernel tree prefix only.
+make -C "$ROOT" O="$OUT" ARCH=arm64 M="$ROOT/pathmask/src" \
+     KCFLAGS="-ffile-prefix-map=$ROOT/=" modules
 
 MOD="$ROOT/pathmask/ksu-module"
 cp -f "$ROOT/pathmask/src/pathmask.ko" "$MOD/pathmask.ko"

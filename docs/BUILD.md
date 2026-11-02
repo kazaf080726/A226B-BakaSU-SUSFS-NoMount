@@ -76,6 +76,35 @@ bash ci/package_kpm.sh  # -> KPM 版 zip
 
 再加上固定的工具链（`clang-r383902` + `binutils 2.27`），本地与 CI 的输入完全一致。
 
+### 还有两个只在"本地 vs CI"之间才暴露的坑
+
+**① 链接器 build-id（Image 差 39 字节）**
+
+所有输入都钉死后，本地和 CI 的 `Image` 仍然会差 **39 字节**，且集中在两处：
+vDSO 里的 `.note.gnu.build-id`（19 字节）和内核自身的同名 note（20 字节）。
+`GNU ld` 对裸 `--build-id` 生成的值不稳定，而 kbuild 默认会加：
+
+```make
+# Makefile:972
+LDFLAGS_BUILD_ID := ... (--build-id)
+KBUILD_LDFLAGS_MODULE += $(LDFLAGS_BUILD_ID)
+LDFLAGS_vmlinux += $(LDFLAGS_BUILD_ID)
+# arch/arm64/kernel/vdso/Makefile:16 里还显式写了 --build-id
+```
+
+修法：vDSO 那处改成 `--build-id=none`，vmlinux/模块通过命令行覆盖 `LDFLAGS_BUILD_ID=`。
+修完之后逐字节比对：其余 29,894,653 字节本来就完全一致。
+
+**② 模块里的绝对路径（`.ko` 差 ~1.3 KiB）**
+
+`pathmask`/`procguard` 是用 `make M=<绝对路径> modules` 编的，所以 `__FILE__`
+和 DWARF 字符串里带的是绝对路径：CI 是 `/home/runner/work/.../pathmask/src/pm_main.c`，
+本地是 `/home/kali/a226b/pathmask/src/pm_main.c`，长度不同 → `.rodata.str1.1`
+和 `.debug_*` 差出 1KB 多。
+
+修法：`pathmask/build.sh` 里给 `KCFLAGS` 加 `-ffile-prefix-map=$ROOT/=`。
+注意 **`ccflags-y` 里加这个不起作用**（覆盖不到生成的 `.mod.c`），必须走 `KCFLAGS`。
+
 ### 实测结果
 
 同一棵树、同一次会话、相隔约 10 分钟、两次 `rm -rf out` 全量构建：
@@ -86,6 +115,9 @@ Image.gz : 7f03c5ab11e7d0d5ff55840841a562b97b9d257caec788bdcab2af7071a35638   (�
 ```
 
 （该次构建的工作树带未提交改动，所以版本串是 `4.14.186+`；提交后同样的源码会得到 `4.14.186`。）
+
+> `Image.gz` 的**压缩字节**还取决于宿主机 gzip 版本（CI 的 Ubuntu 22.04 与本地 26.04 不同），
+> 所以严格比对时请比较**解压后的 `Image`**：`ci/verify.sh` 的复现检查也是基于它。
 
 ## 5. 常见问题
 
