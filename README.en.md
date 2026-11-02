@@ -10,7 +10,7 @@ Type: Non-GKI (arm64)
 > **Free · Public · Actively maintained**
 > Every source file and build artifact of this project is published free of charge and can be compiled by anyone.
 > No paid builds, no paywall, no licence key. Maintenance policy and self-build instructions are in section 7;
-> third-party licences are listed in [NOTICE.md](NOTICE.md).
+> third-party licences are listed in [NOTICE.md](NOTICE.en.md).
 
 1. Download and versions
 ------------------------
@@ -161,7 +161,7 @@ Notes:
   fixed through Issues.
 - **Self-build**: fork the repo -> Actions -> Build SM-A226B kernel -> Run workflow, or build locally
   as described in section 4. Artifacts land in Actions Artifacts; pushing a `v*` tag publishes a release.
-- **Redistribution**: allowed under GPL-2.0 / GPL-3.0 (see [NOTICE.md](NOTICE.md)). Keep the origin and
+- **Redistribution**: allowed under GPL-2.0 / GPL-3.0 (see [NOTICE.md](NOTICE.en.md)). Keep the origin and
   credits, and do not repackage this project as a paid exclusive build.
 - **Scope of support**: no promise that every region/firmware boots; flashing is at your own risk. Even
   if maintenance stops, all sources and past releases stay in the repository.

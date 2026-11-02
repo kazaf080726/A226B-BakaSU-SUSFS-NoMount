@@ -1,3 +1,5 @@
+> 🌐 **中文（默认）** | [English](NOTICE.en.md)
+
 # NOTICE / 第三方代码与许可
 
 本项目是 **Samsung Galaxy A22 5G (SM-A226B) 的 Linux 4.14.186 内核集成仓库**，
