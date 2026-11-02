@@ -71,7 +71,18 @@ done | $cpio --quiet -pd $cpio_dir >/dev/null 2>&1
 find $cpio_dir -type f -print0 |
 	xargs -0 -P8 -n1 perl -pi -e 'BEGIN {undef $/;}; s/\/\*((?!SPDX).)*?\*\///smg;'
 
-tar -Jcf $tarfile -C $cpio_dir/ . > /dev/null
+# Reproducibility: cpio preserved each header's checkout mtime and tar would
+# record both those mtimes and its own readdir ordering, so kheaders_data.tar.xz
+# (and therefore kheaders.ko) differed on every host and every checkout. Pin
+# both to the build timestamp; --sort=name also makes the member order stable.
+if [ -n "${KBUILD_BUILD_TIMESTAMP:-}" ]; then
+	find $cpio_dir -exec touch -d "$KBUILD_BUILD_TIMESTAMP" {} +
+	tar --sort=name --owner=0 --group=0 --numeric-owner \
+	    --mtime="$KBUILD_BUILD_TIMESTAMP" \
+	    -Jcf $tarfile -C $cpio_dir/ . > /dev/null
+else
+	tar -Jcf $tarfile -C $cpio_dir/ . > /dev/null
+fi
 
 echo "$src_files_md5" >  kernel/kheaders.md5
 echo "$obj_files_md5" >> kernel/kheaders.md5

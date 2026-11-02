@@ -132,6 +132,7 @@ Image.gz : 7f03c5ab11e7d0d5ff55840841a562b97b9d257caec788bdcab2af7071a35638   (�
 | `.ko` 里的 DWARF | 头文件搜索路径编码不同 | 打包前 `strip --strip-debug`（顺带把 270 KB 降到 48 KB） |
 | zip 条目顺序 | 跟随 readdir 顺序，不同主机不同 | `find ... -printf '%P' \| LC_ALL=C sort \| zip -@` |
 | zip 里的时间戳 | zip 存的是**本地墙钟**，UTC runner 与 UTC+8 主机差 8 小时 | 打包全程 `TZ=UTC` |
+| `kernel/kheaders.ko` | 把全部头文件打包，cpio 保留了 checkout 时的 mtime，tar 又按 readdir 顺序 | `kernel/gen_kheaders.sh`：`touch -d "$KBUILD_BUILD_TIMESTAMP"` + `tar --sort=name --mtime=... --numeric-owner` |
 
 实测：连续两次完整打包，**8 个产物哈希全部相同**（4 个 zip + Image.gz + Image.kpm.gz + 2 个 .ko）。
 
