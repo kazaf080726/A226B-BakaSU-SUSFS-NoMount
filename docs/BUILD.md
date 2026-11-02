@@ -119,6 +119,20 @@ Image.gz : 7f03c5ab11e7d0d5ff55840841a562b97b9d257caec788bdcab2af7071a35638   (�
 > `Image.gz` 的**压缩字节**还取决于宿主机 gzip 版本（CI 的 Ubuntu 22.04 与本地 26.04 不同），
 > 所以严格比对时请比较**解压后的 `Image`**：`ci/verify.sh` 的复现检查也是基于它。
 
+### ③ zip 包本身：时间戳、gzip 头、DWARF
+
+镜像一致之后，**发布包**（zip）仍然会每次不同，三个原因都已消除：
+
+| 来源 | 现象 | 修法 |
+|---|---|---|
+| `STAMP=$(date -u +%Y%m%d)` | 文件名随构建日期变 | 改为从 `ci/repro-date.txt` 推导 |
+| `build-info.txt` 里的 `date:` | 每次构建时间不同 | 改用同一个 `BUILD_TS` |
+| zip 内各条目的 mtime | 打包瞬间的时钟 | `touch -d "$BUILD_TS"` 全部归一 + `zip -X`（去掉扩展时间戳字段） |
+| `gzip` 头里的文件名/mtime | `Image.kpm.gz` 每次都变 | `gzip -9 -n`（`-n` 即 kbuild 用的那个开关） |
+| `.ko` 里的 DWARF | 头文件搜索路径编码不同 | 打包前 `strip --strip-debug`（顺带把 270 KB 降到 48 KB） |
+
+实测：连续两次完整打包，**8 个产物哈希全部相同**（4 个 zip + Image.gz + Image.kpm.gz + 2 个 .ko）。
+
 ## 5. 常见问题
 
 | 现象 | 原因 / 处理 |

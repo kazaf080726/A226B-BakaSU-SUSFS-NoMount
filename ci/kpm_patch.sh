@@ -44,6 +44,6 @@ echo "[+] verifying patch"
 "$TOOLS/kptools" -l -i "$PATCHED" | tee /tmp/kpm_list.txt
 grep -q 'patched=true' /tmp/kpm_list.txt
 
-gzip -9 -c "$PATCHED" > "$PATCHED.gz"
+gzip -9 -n -c "$PATCHED" > "$PATCHED.gz"
 ls -lh "$PATCHED" "$PATCHED.gz"
 echo KPM_PATCH_OK
