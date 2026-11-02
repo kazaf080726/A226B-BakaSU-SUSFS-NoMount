@@ -132,7 +132,12 @@ Image.gz : 7f03c5ab11e7d0d5ff55840841a562b97b9d257caec788bdcab2af7071a35638   (�
 | `.ko` 里的 DWARF | 头文件搜索路径编码不同 | 打包前 `strip --strip-debug`（顺带把 270 KB 降到 48 KB） |
 | zip 条目顺序 | 跟随 readdir 顺序，不同主机不同 | `find ... -printf '%P' \| LC_ALL=C sort \| zip -@` |
 | zip 里的时间戳 | zip 存的是**本地墙钟**，UTC runner 与 UTC+8 主机差 8 小时 | 打包全程 `TZ=UTC` |
-| `kernel/kheaders.ko` | 把全部头文件打包，cpio 保留了 checkout 时的 mtime，tar 又按 readdir 顺序 | `kernel/gen_kheaders.sh`：`touch -d "$KBUILD_BUILD_TIMESTAMP"` + `tar --sort=name --mtime=... --numeric-owner` |
+| `kernel/kheaders.ko` | 把全部头文件打包，cpio 保留了 checkout 时的 mtime，tar 又按 readdir 顺序 | `kernel/gen_kheaders.sh`：`touch -d "$KBUILD_BUILD_TIMESTAMP"` + `tar --sort=name --mtime=... --numeric-owner`；**该模块不随包发布**（见下） |
+
+> `kernel/kheaders.ko` 另外还有一个无法消除的主机差异：它会把源码树里 **已经生成出来的** 头文件一起打包，
+> 全新 clone 的 CI 一个都没有，而在原地构建过的树会有 17 个（`arch/arm64/include/generated/*`），
+> 归档大小因此差约 26 KB。这个模块只是 `ikheaders` 调试设施（运行时读内核头文件），
+> 手机上没有任何用途，`.ko` 有 3.3 MB，所以 `ci/package.sh` **不再把它打进 modules 包**。
 
 实测：连续两次完整打包，**8 个产物哈希全部相同**（4 个 zip + Image.gz + Image.kpm.gz + 2 个 .ko）。
 

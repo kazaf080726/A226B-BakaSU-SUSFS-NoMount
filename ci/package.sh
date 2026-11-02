@@ -56,7 +56,13 @@ cp -f "$OUT/arch/arm64/boot/Image.gz" "$DIST/Image.gz" 2>/dev/null || cp -f "$OU
 MODS=$(find "$OUT" -name '*.ko' -type f 2>/dev/null | wc -l)
 if [ "$MODS" -gt 0 ]; then
     mkdir -p "$DIST/modules"
-    ( cd "$OUT" && find . -name '*.ko' -type f -exec cp --parents {} "$DIST/modules/" \; )
+    # kernel/kheaders.ko is deliberately not shipped: it embeds a 3.3 MiB tar.xz
+    # of the header tree, it is only useful for the `ikheaders` debugging
+    # facility, and its contents depend on which generated headers happen to
+    # exist in the source tree (a fresh CI clone has none, a tree that has been
+    # built in place has 17). That made it the one artifact that could not be
+    # reproduced across hosts; everything else is byte-identical.
+    ( cd "$OUT" && find . -name '*.ko' -type f ! -path './kernel/kheaders.ko' -exec cp --parents {} "$DIST/modules/" \; )
     # Same reason as the PathMask LKMs: in-tree modules keep DWARF whose include
     # paths are build-tree relative (CI writes "out/../include/linux", a local
     # build writes "out/include/linux"), which is the only thing that made this
