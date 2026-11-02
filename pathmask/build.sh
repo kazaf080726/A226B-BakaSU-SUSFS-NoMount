@@ -55,7 +55,8 @@ cp -f "$ROOT/pathmask/src/procguard.ko" "$MOD/procguard.ko"
 
 mkdir -p "$DIST"
 find "$MOD" -exec touch -h -d "$BUILD_TS" {} + 2>/dev/null || true
-( cd "$MOD" && zip -Xr9 "$DIST/A226B-PathMask-4.14-$STAMP.zip" . -x '*.git*' >/dev/null )
+TZ=UTC LC_ALL=C find "$MOD" \( -type f -o -type l \) -printf '%P\n' | LC_ALL=C sort \
+    | ( cd "$MOD" && TZ=UTC zip -X -9 -@ "$DIST/A226B-PathMask-4.14-$STAMP.zip" >/dev/null )
 cp -f "$ROOT/pathmask/src/pathmask.ko" "$DIST/pathmask-4.14.ko"
 cp -f "$ROOT/pathmask/src/procguard.ko" "$DIST/procguard-4.14.ko"
 

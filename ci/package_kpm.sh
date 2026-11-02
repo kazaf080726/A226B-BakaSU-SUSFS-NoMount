@@ -39,7 +39,8 @@ cp -f "$KIMG" "$AK/Image.gz"
 } > "$AK/build-info.txt"
 
 find "$AK" -exec touch -h -d "$BUILD_TS" {} + 2>/dev/null || true
-( cd "$AK" && zip -Xr9 "$DIST/$ARTIFACT_NAME-$STAMP.zip" . -x '*.git*' >/dev/null )
+TZ=UTC LC_ALL=C find "$AK" \( -type f -o -type l \) -printf '%P\n' | LC_ALL=C sort \
+    | ( cd "$AK" && TZ=UTC zip -X -9 -@ "$DIST/$ARTIFACT_NAME-$STAMP.zip" >/dev/null )
 cp -f "$KIMG" "$DIST/Image.kpm.gz"
 ls -lh "$DIST/$ARTIFACT_NAME-$STAMP.zip" "$DIST/Image.kpm.gz"
 echo KPM_PACKAGE_OK

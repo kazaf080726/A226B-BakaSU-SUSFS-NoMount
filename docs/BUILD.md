@@ -130,6 +130,8 @@ Image.gz : 7f03c5ab11e7d0d5ff55840841a562b97b9d257caec788bdcab2af7071a35638   (�
 | zip 内各条目的 mtime | 打包瞬间的时钟 | `touch -d "$BUILD_TS"` 全部归一 + `zip -X`（去掉扩展时间戳字段） |
 | `gzip` 头里的文件名/mtime | `Image.kpm.gz` 每次都变 | `gzip -9 -n`（`-n` 即 kbuild 用的那个开关） |
 | `.ko` 里的 DWARF | 头文件搜索路径编码不同 | 打包前 `strip --strip-debug`（顺带把 270 KB 降到 48 KB） |
+| zip 条目顺序 | 跟随 readdir 顺序，不同主机不同 | `find ... -printf '%P' \| LC_ALL=C sort \| zip -@` |
+| zip 里的时间戳 | zip 存的是**本地墙钟**，UTC runner 与 UTC+8 主机差 8 小时 | 打包全程 `TZ=UTC` |
 
 实测：连续两次完整打包，**8 个产物哈希全部相同**（4 个 zip + Image.gz + Image.kpm.gz + 2 个 .ko）。
 

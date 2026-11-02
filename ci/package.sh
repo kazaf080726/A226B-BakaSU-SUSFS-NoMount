@@ -44,7 +44,12 @@ fi
 } > "$AK/build-info.txt"
 
 find "$AK" -exec touch -h -d "$BUILD_TS" {} + 2>/dev/null || true
-( cd "$AK" && zip -Xr9 "$DIST/$ARTIFACT_NAME-$STAMP.zip" . -x '*.git*' >/dev/null )
+# zip stores DOS timestamps in *local* wall-clock time, so TZ must be pinned or
+# a UTC runner and a UTC+8 workstation disagree by eight hours. Entry order also
+# follows readdir order unless it is imposed here, and that differs between
+# hosts. Sort the names and feed them through -@ so both sides agree.
+TZ=UTC LC_ALL=C find "$AK" \( -type f -o -type l \) -printf '%P\n' | LC_ALL=C sort \
+    | ( cd "$AK" && TZ=UTC zip -X -9 -@ "$DIST/$ARTIFACT_NAME-$STAMP.zip" >/dev/null )
 cp -f "$OUT/arch/arm64/boot/Image.gz" "$DIST/Image.gz" 2>/dev/null || cp -f "$OUT/arch/arm64/boot/Image" "$DIST/Image"
 
 # collect modules (if any)
@@ -53,7 +58,8 @@ if [ "$MODS" -gt 0 ]; then
     mkdir -p "$DIST/modules"
     ( cd "$OUT" && find . -name '*.ko' -type f -exec cp --parents {} "$DIST/modules/" \; )
     find "$DIST/modules" -exec touch -h -d "$BUILD_TS" {} + 2>/dev/null || true
-    ( cd "$DIST/modules" && zip -Xr9 "$DIST/$ARTIFACT_NAME-modules-$STAMP.zip" . >/dev/null )
+    TZ=UTC LC_ALL=C find "$DIST/modules" \( -type f -o -type l \) -printf '%P\n' | LC_ALL=C sort \
+        | ( cd "$DIST/modules" && TZ=UTC zip -X -9 -@ "$DIST/$ARTIFACT_NAME-modules-$STAMP.zip" >/dev/null )
 fi
 
 ls -lh "$DIST"
