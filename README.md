@@ -130,6 +130,9 @@ KPM：KPatch-Next 0.13.5-2 的 kptools/kpimg（脚本内固定版本）。
 
 注意：
 - 本 zip 只替换 boot 分区中的 kernel，保留原厂 ramdisk/dtb。
+- **维护者自测与发布前验证一律使用 KPM 版**（功能超集，一次刷机同时覆盖内核本体、
+  全部隐藏功能与 KPM 链路）；日常使用仍建议标准版。原因与边界见
+  [docs/MAINTAINER-NOTES.md](docs/MAINTAINER-NOTES.md) 第 0.1 节。
 - 标准版与 KPM 版是同一个内核源码，仅 Image 是否追加 kpimg 不同；
   两者不要混刷模块，KPM 版必须搭配 KPatch-Next-Module。
 - 三星 AVB/vbmeta 可能导致校验失败；AK3 已带 PATCH_VBMETA_FLAG=auto，

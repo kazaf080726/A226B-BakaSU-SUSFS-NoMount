@@ -35,6 +35,33 @@
 7. **验证结论也要有证据。** 不要写"应该没问题"，要写"第 X 行日志已消失 / 哈希等于 Y /
    设备上第 N 项检查通过"。本仓库的验证记录都带具体值，就是为了可复核。
 
+## 0.1 测试策略：默认用 KPM 版（功能超集）
+
+**维护者自测与发布前验证，一律刷 KPM 版**（`A226B-BakaSU-SUSFS-NoMount-KPM-*.zip`）。
+
+理由：KPM 版是标准版的**超集**——同一份内核源码，只是在镜像级追加并打补丁 kpimg。
+刷一次就同时覆盖三件事：内核本体、SUSFS/NoMount/BakaSU/PathMask 全部功能、KPM 链路。
+只测标准版永远测不到 KPM；测 KPM 版能把覆盖面拉到最大。
+
+**边界（必须说清楚，不要当成"KPM 通过 = 标准版必然通过"）**：
+
+- KPM 镜像 = 标准镜像经 kptools 打补丁 + 追加 kpimg，两者**不是**逐字节包含关系
+  （实测 `sha256(kpm_Image[:len(Image)]) != sha256(Image)`），被补丁改写的指令区段
+  在标准版里是原始代码
+- 所以标准版的保证来自"同源码 + CI 逐字节产物一致"，而不是来自 KPM 版的实机结果；
+  怀疑补丁区段有差异时，补刷一次标准版做对照
+
+**KPM 版刷机后的验证清单**：
+
+1. 读回 boot 分区内核段，`sha256` 必须等于 Release 里的 `Image.kpm.gz`
+2. 7 项加固（见第 5 节）
+3. `pathmask`/`procguard` 已加载、`boot_state=loaded`、隐藏目标生效
+4. 安装 KPatch-Next-Module 后，用其 WebUI 能正常加载/卸载一个 `.kpm`
+5. 无 `SYSTEM_ERROR` 窗口、无内核崩溃、`dmesg` 无告警
+
+只刷内核而没装 KPatch-Next-Module 时，第 4 项无法验证，此时 KPM 部分只证明了
+"打过补丁的内核能正常开机运行"。
+
 ## 1. 这是什么
 
 Samsung Galaxy A22 5G（SM-A226B / a22x，MT6833）的 **Linux 4.14.186** 内核，

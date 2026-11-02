@@ -130,6 +130,10 @@ Reproducible builds:
 
 Notes:
 - The zip replaces only the kernel inside the boot partition; the stock ramdisk/dtb are kept.
+- **Maintainer self-testing and pre-release verification always use the KPM variant** — it is a superset,
+  so one flash covers the kernel itself, the whole hiding stack and the KPM path. For daily use the
+  standard build is still recommended. Rationale and boundaries: section 0.1 of
+  [docs/en/MAINTAINER-NOTES.md](docs/en/MAINTAINER-NOTES.md).
 - Standard and KPM are the same kernel source; only whether kpimg is appended differs. Do not mix
   modules between them: the KPM build requires KPatch-Next-Module.
 - Samsung AVB/vbmeta may reject the modified boot image. AK3 ships PATCH_VBMETA_FLAG=auto; if it still

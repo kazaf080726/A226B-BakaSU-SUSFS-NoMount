@@ -40,6 +40,35 @@ project — check them before changing anything:
    hash equals Y / check N passed on the device". The verification records in this repository carry
    concrete values so they can be re-checked.
 
+## 0.1 Testing policy: the KPM build is the default test target
+
+**Maintainer self-testing and pre-release verification always flash the KPM variant**
+(`A226B-BakaSU-SUSFS-NoMount-KPM-*.zip`).
+
+Because it is a **superset** of the standard build: the same kernel source, with kpimg appended and
+patched in at image level. One flash then covers three things at once — the kernel itself, the whole
+SUSFS/NoMount/BakaSU/PathMask feature set, and the KPM path. Testing only the standard build can never
+exercise KPM; testing the KPM build maximises coverage.
+
+**Boundary (do not treat "KPM passed" as "the standard build must pass")**:
+
+- The KPM image is the standard image patched by kptools with kpimg appended — they are **not** a
+  byte-prefix relationship (measured: `sha256(kpm_Image[:len(Image)]) != sha256(Image)`), and the
+  instruction ranges rewritten by the patch are original code in the standard image
+- The standard build is therefore guaranteed by "same source + byte-identical CI artifacts", not by the
+  KPM device result. If a patched range is ever in doubt, flash the standard build as a control
+
+**Checklist after flashing the KPM build**:
+
+1. Read the boot partition back and confirm the kernel segment's `sha256` equals the released `Image.kpm.gz`
+2. The seven hardening checks (section 5)
+3. `pathmask`/`procguard` loaded, `boot_state=loaded`, hidden targets effective
+4. With KPatch-Next-Module installed, load and unload a `.kpm` through its WebUI
+5. No `SYSTEM_ERROR` window, no kernel crash, no dmesg warnings
+
+If only the kernel was flashed and KPatch-Next-Module is not installed, item 4 cannot be checked — in
+that case the KPM path only proves that "the patched kernel boots and runs".
+
 ## 1. What this is
 
 Samsung Galaxy A22 5G (SM-A226B / a22x, MT6833), **Linux 4.14.186**, built on Samsung's own open source
