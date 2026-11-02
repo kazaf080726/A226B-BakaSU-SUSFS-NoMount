@@ -5,7 +5,7 @@
 > Written for whoever picks this repository up cold — a person or an AI. One of the reasons this project
 > is fully open source is that even if the maintainer loses a machine or their local files, the whole
 > context can be rebuilt from the repository itself.
-> Suggested order: [README](../README.en.md) → this file → [FEATURES](FEATURES.md) → [BUILD](BUILD.md) → [CHANGELOG](CHANGELOG.md)
+> Suggested order: [README](../../README.en.md) → this file → [FEATURES](FEATURES.md) → [BUILD](BUILD.md) → [CHANGELOG](CHANGELOG.md)
 
 ## 0. Ground rule: evidence before touching the kernel
 
