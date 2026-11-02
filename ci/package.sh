@@ -57,6 +57,14 @@ MODS=$(find "$OUT" -name '*.ko' -type f 2>/dev/null | wc -l)
 if [ "$MODS" -gt 0 ]; then
     mkdir -p "$DIST/modules"
     ( cd "$OUT" && find . -name '*.ko' -type f -exec cp --parents {} "$DIST/modules/" \; )
+    # Same reason as the PathMask LKMs: in-tree modules keep DWARF whose include
+    # paths are build-tree relative (CI writes "out/../include/linux", a local
+    # build writes "out/include/linux"), which is the only thing that made this
+    # archive differ between hosts.
+    STRIP="$ROOT/toolchain/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin/aarch64-linux-androidkernel-strip"
+    if [ -x "$STRIP" ]; then
+        find "$DIST/modules" -name '*.ko' -type f -exec "$STRIP" --strip-debug {} + 2>/dev/null || true
+    fi
     find "$DIST/modules" -exec touch -h -d "$BUILD_TS" {} + 2>/dev/null || true
     TZ=UTC LC_ALL=C find "$DIST/modules" \( -type f -o -type l \) -printf '%P\n' | LC_ALL=C sort \
         | ( cd "$DIST/modules" && TZ=UTC zip -X -9 -@ "$DIST/$ARTIFACT_NAME-modules-$STAMP.zip" >/dev/null )
