@@ -1,3 +1,5 @@
+> 🌐 **中文（默认）** | [English](en/MAINTAINER-NOTES.md)
+
 # 接管者笔记 / Maintainer notes
 
 > 写给"从零接手这个仓库的人或 AI"。这个仓库被完整开源的目的之一就是：

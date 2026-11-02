@@ -1,3 +1,5 @@
+> 🌐 **中文（默认）** | [English](README.en.md)
+
 BakaSU + SUSFS + NoMount kernel for Samsung Galaxy A22 5G (SM-A226B)
 =========================================================================
 
@@ -145,7 +147,10 @@ KPM：KPatch-Next 0.13.5-2 的 kptools/kpimg（脚本内固定版本）。
 - patches/        本仓库相对原厂源码的集成改动说明（见 patches/README.md）
 - docs/           功能清单 [docs/FEATURES.md](docs/FEATURES.md)、构建与可复现性 [docs/BUILD.md](docs/BUILD.md)、
                   变更历史 [docs/CHANGELOG.md](docs/CHANGELOG.md)、发版说明与 XDA 帖草稿
-                  ([docs/RELEASE-v1.4.0.md](docs/RELEASE-v1.4.0.md)、[docs/XDA.md](docs/XDA.md))
+                  ([docs/RELEASE-v1.4.0.md](docs/RELEASE-v1.4.0.md)、[docs/XDA.md](docs/XDA.md))、
+                  **接管者笔记 [docs/MAINTAINER-NOTES.md](docs/MAINTAINER-NOTES.md)**
+  - 每篇文档都有英文镜像，放在 [docs/en/](docs/en/)，文首有语言切换条；
+    README 的英文版是 [README.en.md](README.en.md)
 
 七、维护、免费与自编译
 ----------------------

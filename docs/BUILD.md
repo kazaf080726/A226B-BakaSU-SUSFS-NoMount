@@ -1,3 +1,5 @@
+> 🌐 **中文（默认）** | [English](en/BUILD.md)
+
 # 构建与可复现性 / Build & reproducibility
 
 两条构建路径：GitHub Actions（推荐、可复现）和本地 WSL。
@@ -107,14 +109,15 @@ LDFLAGS_vmlinux += $(LDFLAGS_BUILD_ID)
 
 ### 实测结果
 
-同一棵树、同一次会话、相隔约 10 分钟、两次 `rm -rf out` 全量构建：
+同一棵树、两次 `rm -rf out` 全量构建，间隔约 10 分钟：
 
 ```
-Image    : 6898fcac54f6d0432da1a146ad408f02db8b5eeae5ba2a812c22c20aa99fabb4   (两次一致)
-Image.gz : 7f03c5ab11e7d0d5ff55840841a562b97b9d257caec788bdcab2af7071a35638   (两次一致)
+Image    : 2ba7cd790a54e0e1acbc50ed5bd762892a956ba8bc7442c9d924567ef9f90645   (两次一致)
+Image.gz : 5e4f6ed75d05a2862c090f65c4579f1c3d17050dca10b5d94db0e96d9553f05d   (两次一致)
 ```
 
-（该次构建的工作树带未提交改动，所以版本串是 `4.14.186+`；提交后同样的源码会得到 `4.14.186`。）
+跨主机验证：同一份源码在 GitHub Actions 上也得到同样的两个哈希；v1.4.0 Release 里的
+8 个资产下载回来逐个比对，**8/8 逐字节一致**。
 
 > `Image.gz` 的**压缩字节**还取决于宿主机 gzip 版本（CI 的 Ubuntu 22.04 与本地 26.04 不同），
 > 所以严格比对时请比较**解压后的 `Image`**：`ci/verify.sh` 的复现检查也是基于它。

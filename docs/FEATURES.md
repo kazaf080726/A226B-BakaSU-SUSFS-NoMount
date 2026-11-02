@@ -1,3 +1,5 @@
+> 🌐 **中文（默认）** | [English](en/FEATURES.md)
+
 # 功能清单 / Feature inventory
 
 本文件是"这个内核到底改了什么、每个功能落在哪个文件、怎么验证"的权威清单。
@@ -152,7 +154,7 @@ uname -a                                  # 应显示被 SUSFS 伪造的原厂�
 cat /proc/version                         # 加固后应与 uname 一致（不再暴露 A226B@a22x）
 su -c 'grep -c -e _ksu_ -e susfs /proc/kallsyms'  # 加固后期望 0
 su -c 'ls -ld /proc/fs'                   # 期望 dr-x------ root root
-ls -l /proc/config.gz                     # 加固后期望 -r--------
+ls -l /proc/config.gz                     # 加固后期望 -r--r----- root system
 cat /proc/sys/kernel/dmesg_restrict       # 加固后期望 1
 cat /sys/module/pathmask/parameters/target_paths   # 加固后作为 App 应 Permission denied
 su -c 'cat /proc/modules' | grep -c -e pathmask -e procguard  # root 可见；App 应看不到

@@ -1,3 +1,5 @@
+> 🌐 **中文（默认）** | [English](en/CHANGELOG.md)
+
 # 变更历史 / Changelog
 
 按版本倒序。逐条细节见 `git log`；功能与生效点见 [FEATURES.md](FEATURES.md)。
@@ -28,13 +30,32 @@
 ### 反检测加固（实机审计驱动）
 - `/proc/version` 跟随 SUSFS 伪造的 `uname`（此前直接暴露 `4.14.186+ (A226B@a22x)`）
 - `/proc/sys/kernel/{osrelease,version}` 同样跟随伪造（此前与 `uname` **自相矛盾**）
-- `/proc/config.gz` 由 `0444` 改为 `0400`（此前可直接读出 `CONFIG_KSU=y` 等）
+- `/proc/config.gz` 由 `0444` 改为 **`0440` + 属组 `system`(1000)**
+  （此前可直接读出 `CONFIG_KSU=y` 等；中途曾收紧到 `0400`，导致 system_server 的
+  `libvintf` 读不到内核配置、VINTF 校验失败，开机弹「设备内部出现问题」，已修正）
 - `CONFIG_SECURITY_DMESG_RESTRICT=y`（此前 `dmesg_restrict=0`，dmesg 里有 `KernelSU:`/`susfs:`）
 - `/sys/module/{pathmask,procguard}/parameters/*` 由 `0644/0444` 改为 `0400`
   （此前能读到 `target_paths`、`deny_uids` 等隐藏配置）
 - `/proc/kallsyms` 增加 `_ksu_` / `.ksu_` / `susfs` / `kernelsu` / `ksud` 子串过滤，
   覆盖设备上残留的全部 10 个符号（含 `__initcall_kernelsu_init6`）
 - `/proc/modules` 对 app/isolated UID 隐藏 `pathmask`、`procguard`
+
+### 构建可复现（续，跨主机比对后补齐）
+
+第一轮只做到了"同机两次构建一致"。拿 CI 产物逐字节比对后，又修掉四处：
+
+- **链接器 build-id**：本地与 CI 的 `Image` 差 39 字节（vDSO 19 + 内核 20），
+  裸 `--build-id` 生成的值不稳定 → vDSO 改 `--build-id=none`，vmlinux/模块用
+  `LDFLAGS_BUILD_ID=` 覆盖
+- **模块里的绝对路径**：`.ko` 差 ~1.3 KiB（`__FILE__`/DWARF 里是构建目录绝对路径）
+  → `KCFLAGS=-ffile-prefix-map=$ROOT/=`，打包前 `strip --strip-debug`（270 KB → 48 KB）
+- **zip 包本身**：包名与 `build-info.txt` 时间戳改用 `ci/repro-date.txt`；条目 mtime
+  归一 + `zip -X`；条目顺序改为排序后 `zip -@`；打包全程 `TZ=UTC`（zip 存的是本地墙钟）
+- **`kernel/kheaders.ko`**：归档里 cpio 保留 checkout mtime、tar 按 readdir 顺序 →
+  `kernel/gen_kheaders.sh` 加 `touch -d` + `tar --sort=name --mtime=...`；
+  该模块另有一处无法消除的主机差异，故不再随包发布
+
+最终结果：本地两次构建、CI 构建、v1.4.0 Release 资产，**8 个产物哈希全部相同**。
 
 ### 文档
 - 新增 [FEATURES.md](FEATURES.md)：逐项功能 → 生效文件/行号 → 验证方法
