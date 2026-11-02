@@ -69,6 +69,53 @@ exercise KPM; testing the KPM build maximises coverage.
 If only the kernel was flashed and KPatch-Next-Module is not installed, item 4 cannot be checked — in
 that case the KPM path only proves that "the patched kernel boots and runs".
 
+## 0.2 How to actually test the KPM path (reproducible)
+
+Checklist item 4 above ("can load a `.kpm`") can be verified end to end with the upstream demo. This
+repository's toolchain ships clang + binutils only (no gcc driver), so `make` does not work directly —
+build it in two steps:
+
+```bash
+# 1) build the demo (headers come from the KPatch-Next tree that ci/kpm_patch.sh already unpacked)
+KPSRC=~/a226b/.kpm-tools/KPatch-Next-0.13.5-2
+CLANG=~/a226b/toolchain/clang/host/linux-x86/clang-r383902/bin/clang
+LD=~/a226b/toolchain/gcc/linux-x86/aarch64/aarch64-linux-android-4.9/bin/aarch64-linux-androidkernel-ld
+cd "$KPSRC/kpms/demo-hello"
+INC=""; for d in . include patch/include linux/include linux/arch/arm64/include linux/tools/arch/arm64/include; do
+    INC="$INC -I$KPSRC/kernel/$d"; done
+$CLANG --target=aarch64-none-elf -ffreestanding -nostdlibinc -fno-builtin \
+       $INC -Thello.lds -c -O2 -o hello.o hello.c
+$LD -r -o hello.kpm hello.o          # must be the aarch64 ld; the host ld fails with EM:183 / wrong format
+```
+
+```sh
+# 2) on the device: load -> call -> unload (kpatch lives in /data/adb/modules/KPatch-Next/bin)
+export PATH=/data/adb/modules/KPatch-Next/bin:$PATH
+kpatch kpver                                       # runtime version, measured d05
+kpatch hello                                       # expect hello2026
+kpatch kpm load /data/local/tmp/hello.kpm "args"   # rc=0
+kpatch kpm list                                    # kpm-hello-demo
+kpatch kpm info kpm-hello-demo                     # name/version/license/author
+kpatch kpm ctl0 kpm-hello-demo ping123             # expect "echo: ping123"
+kpatch kpm unload kpm-hello-demo                   # rc=0
+kpatch kpm num                                     # back to 0
+```
+
+Expected kernel log (`dmesg | grep -i kpm`):
+
+```
+kpm hello init, event: load-file, args: ...
+load_module: [kpm-hello-demo] succeed with [...]
+kpm hello control0, args: ping123
+kpm hello exit
+unload_module: name: kpm-hello-demo, rc: 0
+```
+
+**Measured (v1.4.0-fix / KPM build)**: `kpver=d05`, `kver=40eba`, `hello=hello2026`, load/ctl0/unload all
+`rc=0`, `kpm num` went 1 → 0, no crash and no `SYSTEM_ERROR` window afterwards. This also proves the
+released `Image.kpm.gz` is not merely "182 KB bigger": kpimg really does take over and export the KPM
+runtime.
+
 ## 1. What this is
 
 Samsung Galaxy A22 5G (SM-A226B / a22x, MT6833), **Linux 4.14.186**, built on Samsung's own open source
